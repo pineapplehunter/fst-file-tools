@@ -6,7 +6,7 @@ pub type VarInt = u64;
 pub type SVarInt = i64;
 
 pub fn parse_varint(input: &[u8]) -> FstFileResult<'_, VarInt> {
-    let (input, data) = take_while(|b| b & 0b1000_000 != 0)(input)?;
+    let (input, data) = take_while(|b| b & 0b100_0000 != 0)(input)?;
     let (input, last) = take(1u8)(input)?;
     let mut val = 0;
     val += last[0] as u64;

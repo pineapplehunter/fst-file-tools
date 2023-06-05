@@ -26,7 +26,7 @@ pub enum Block {
     AnonBlock(BlockType, usize),
 }
 
-pub fn parse_block<'a>(input: &'a [u8]) -> FstFileResult<'a, Block> {
+pub fn parse_block(input: &[u8]) -> FstFileResult<'_, Block> {
     let (input, block_type) = parse_block_type(input)?;
     let (input, length) = map_res(be_u64, |s| {
         usize::try_from(s).map_err(|_e| BlockParseError::LengthTooLargeForMachine)

@@ -31,7 +31,7 @@ pub enum BlockType {
     Skip = 255,
 }
 
-pub fn parse_block_type<'a>(input: &'a [u8]) -> FstFileResult<'a, BlockType> {
+pub fn parse_block_type(input: &[u8]) -> FstFileResult<'_, BlockType> {
     map_res(take(1u32), |data: &[u8]| {
         BlockType::from_u8(data[0]).ok_or(BlockParseError::BlockTypeUnknown(data[0]))
     })(input)

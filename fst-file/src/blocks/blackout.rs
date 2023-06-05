@@ -20,13 +20,13 @@ pub struct BlackoutBlock {
     records: Vec<BlackoutRecord>,
 }
 
-fn parse_record<'a>(input: &'a [u8]) -> FstFileResult<'a, BlackoutRecord> {
+fn parse_record(input: &[u8]) -> FstFileResult<'_, BlackoutRecord> {
     let (input, active) = map(take(1u8), |b: &[u8]| b[0] == 1)(input)?;
     let (input, time_delta) = parse_varint(input)?;
     Ok((input, BlackoutRecord { active, time_delta }))
 }
 
-pub fn parse_blackout_block<'a>(input: &'a [u8]) -> FstFileResult<'a, BlackoutBlock> {
+pub fn parse_blackout_block(input: &[u8]) -> FstFileResult<'_, BlackoutBlock> {
     let (input, count) = map_res(parse_varint, |v| {
         usize::try_from(v).map_err(|_e| BlockParseError::LengthTooLargeForMachine)
     })(input)?;

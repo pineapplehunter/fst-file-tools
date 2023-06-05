@@ -29,7 +29,7 @@ pub struct HeaderBlock {
     pub timezero: i64,
 }
 
-pub fn parse_header_block<'a>(input: &'a [u8]) -> FstFileResult<'a, HeaderBlock> {
+pub fn parse_header_block(input: &[u8]) -> FstFileResult<'_, HeaderBlock> {
     let (input, start_time) = be_u64(input)?;
     let (input, end_time) = be_u64(input)?;
     let (input, real_endianness) = le_f64(input)?;
