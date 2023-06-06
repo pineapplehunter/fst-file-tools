@@ -362,39 +362,39 @@ impl<'a> HierarchyBlock<'a> {
     }
 }
 
-fn attr_begin<'a>(
-    input: &'a [(Span, HierarchyToken)],
-) -> FstFileResult<'a, &'a HierarchyToken, &'a [(Span, HierarchyToken)]> {
+fn attr_begin(
+    input: &[(Span, HierarchyToken)],
+) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
     token_condition(|t| matches!(t, HierarchyToken::Attribute(_)))(input)
 }
 
-fn attr_end<'a>(
-    input: &'a [(Span, HierarchyToken)],
-) -> FstFileResult<'a, &'a HierarchyToken, &'a [(Span, HierarchyToken)]> {
+fn attr_end(
+    input: &[(Span, HierarchyToken)],
+) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
     token(HierarchyToken::AttributeEnd)(input)
 }
 
-fn scope_begin<'a>(
-    input: &'a [(Span, HierarchyToken)],
-) -> FstFileResult<'a, &'a HierarchyToken, &'a [(Span, HierarchyToken)]> {
+fn scope_begin(
+    input: &[(Span, HierarchyToken)],
+) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
     token_condition(|t| matches!(t, HierarchyToken::ScopeBegin(_)))(input)
 }
 
-fn vcd<'a>(
-    input: &'a [(Span, HierarchyToken)],
-) -> FstFileResult<'a, &'a HierarchyToken, &'a [(Span, HierarchyToken)]> {
+fn vcd(
+    input: &[(Span, HierarchyToken)],
+) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
     token_condition(|t| matches!(t, HierarchyToken::Vcd(_)))(input)
 }
 
-fn unknown<'a>(
-    input: &'a [(Span, HierarchyToken)],
-) -> FstFileResult<'a, &'a HierarchyToken, &'a [(Span, HierarchyToken)]> {
+fn unknown(
+    input: &[(Span, HierarchyToken)],
+) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
     token_condition(|t| matches!(t, HierarchyToken::Unknown(_)))(input)
 }
 
-fn scope_end<'a>(
-    input: &'a [(Span, HierarchyToken)],
-) -> FstFileResult<'a, &'a HierarchyToken, &'a [(Span, HierarchyToken)]> {
+fn scope_end(
+    input: &[(Span, HierarchyToken)],
+) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
     token(HierarchyToken::ScopeEnd)(input)
 }
 

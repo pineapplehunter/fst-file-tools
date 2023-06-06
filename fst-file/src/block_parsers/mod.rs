@@ -38,9 +38,7 @@ impl Block<'_> {
     fn extract_data_lz4(&self) -> Vec<u8> {
         let uncompressed_size =
             usize::try_from(u64::from_be_bytes(self.data[..8].try_into().unwrap())).unwrap();
-        let mut data = Vec::new();
-        data.resize(uncompressed_size, 0);
-        lzzzz::lz4::decompress(&self.data[8..], &mut data).unwrap();
+        let data = lz4_flex::block::decompress(&self.data[8..], uncompressed_size).unwrap();
         if data.len() != uncompressed_size {
             warn!(
                 data_len = data.len(),
@@ -56,11 +54,7 @@ impl Block<'_> {
             usize::try_from(u64::from_be_bytes(self.data[..8].try_into().unwrap())).unwrap();
         let uncompressed_once_size =
             usize::try_from(u64::from_be_bytes(self.data[8..16].try_into().unwrap())).unwrap();
-        let mut data = Vec::new();
-        data.resize(uncompressed_once_size, 0);
-        lzzzz::lz4::decompress(&self.data[16..], &mut data).unwrap();
-        let mut data2 = Vec::new();
-        data2.resize(uncompressed_size, 0);
+        let data = lz4_flex::block::decompress(&self.data[8..], uncompressed_once_size).unwrap();
         if data.len() != uncompressed_once_size {
             warn!(
                 data_len = data.len(),
@@ -68,8 +62,7 @@ impl Block<'_> {
                 "first extracted data size did not match specified.",
             );
         }
-
-        lzzzz::lz4::decompress(&data[..], &mut data2).unwrap();
+        let data2 = lz4_flex::block::decompress(&data, uncompressed_size).unwrap();
         if data2.len() != uncompressed_size {
             warn!(
                 data_len = data2.len(),
