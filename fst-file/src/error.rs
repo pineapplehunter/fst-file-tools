@@ -4,7 +4,7 @@ use nom::{
 };
 use thiserror::Error;
 
-use crate::data_types::{VarIntParseErrorKind};
+use crate::{blocks::hierarchy::HierarchyParseErrorKind, data_types::VarIntParseErrorKind};
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum BlockParseError {
@@ -28,6 +28,8 @@ pub enum FstFileParseErrorInner {
     NomError(ErrorKind),
     #[error("var int parse error > {0}")]
     VarIntParseError(#[from] VarIntParseErrorKind),
+    #[error("hierarchy parse error > {0}")]
+    HierarchyParseError(#[from] HierarchyParseErrorKind),
     #[error("context {0}")]
     Context(&'static str),
 }

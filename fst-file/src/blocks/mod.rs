@@ -8,9 +8,9 @@ use crate::{
     error::FstFileResult,
 };
 
-// pub mod blackout;
-// pub mod header;
-// pub mod hierarchy;
+pub mod blackout;
+pub mod header;
+pub mod hierarchy;
 
 #[derive(Clone)]
 pub struct Block<'a> {
@@ -39,6 +39,7 @@ impl Block<'_> {
         let uncompressed_size =
             usize::try_from(u64::from_be_bytes(self.data[..8].try_into().unwrap())).unwrap();
         let mut data = Vec::new();
+        data.resize(uncompressed_size, 0);
         lzzzz::lz4::decompress(&self.data[8..], &mut data).unwrap();
         if data.len() != uncompressed_size {
             warn!(
@@ -56,8 +57,10 @@ impl Block<'_> {
         let uncompressed_once_size =
             usize::try_from(u64::from_be_bytes(self.data[8..16].try_into().unwrap())).unwrap();
         let mut data = Vec::new();
+        data.resize(uncompressed_once_size, 0);
         lzzzz::lz4::decompress(&self.data[16..], &mut data).unwrap();
         let mut data2 = Vec::new();
+        data2.resize(uncompressed_size, 0);
         if data.len() != uncompressed_once_size {
             warn!(
                 data_len = data.len(),
@@ -97,7 +100,7 @@ impl Block<'_> {
         self.data
     }
 
-    pub fn len(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.data.len() + 9
     }
 }

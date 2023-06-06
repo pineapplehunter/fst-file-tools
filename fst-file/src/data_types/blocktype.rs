@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::error::{BlockParseError, FstFileResult};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Primitive, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Primitive, Serialize, Hash, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum BlockType {
     #[doc(alias = "FST_BL_HDR")]
@@ -37,22 +37,22 @@ pub enum BlockType {
 impl fmt::Display for BlockType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BlockType::Header => Debug::fmt(&self, f),
-            BlockType::ValueChangeData => write!(f, "Value Change Data (Gzip)"),
-            BlockType::Blackout => Debug::fmt(&self, f),
-            BlockType::Geometry => Debug::fmt(&self, f),
-            BlockType::HierarchyGz => write!(f, "Hierarchy (Gzip)"),
-            BlockType::ValueChangeDataAlias => write!(f, "Value Change Data (alias)"),
-            BlockType::HierarchyLz4 => write!(f, "Hierarchy (Lz4)"),
-            BlockType::HierarchyLz4Duo => write!(f, "Hierarchy (Lz4 x2)"),
-            BlockType::ValueChangeDataAlias2 => write!(f, "Value Change Data (alias 2)"),
-            BlockType::GZippedWrapper => write!(f, "Gzipped FST File"),
-            BlockType::Skip => Debug::fmt(&self, f),
+            BlockType::Header => f.pad("Header"),
+            BlockType::ValueChangeData => f.pad("Value Change Data (Gzip)"),
+            BlockType::Blackout => f.pad("Blackout"),
+            BlockType::Geometry => f.pad("Geometry"),
+            BlockType::HierarchyGz => f.pad("Hierarchy (Gzip)"),
+            BlockType::ValueChangeDataAlias => f.pad("Value Change Data (alias)"),
+            BlockType::HierarchyLz4 => f.pad("Hierarchy (Lz4)"),
+            BlockType::HierarchyLz4Duo => f.pad("Hierarchy (Lz4 x2)"),
+            BlockType::ValueChangeDataAlias2 => f.pad("Value Change Data (alias 2)"),
+            BlockType::GZippedWrapper => f.pad("Gzipped FST File"),
+            BlockType::Skip => f.pad("Skip"),
         }
     }
 }
 
-pub fn parse_block_type<'a>(input: &'a [u8]) -> FstFileResult<'a, BlockType> {
+pub fn parse_block_type(input: &[u8]) -> FstFileResult<'_, BlockType> {
     map_res(take(1u32), |data: &[u8]| {
         BlockType::from_u8(data[0]).ok_or((data, BlockParseError::BlockTypeUnknown(data[0])))
     })(input)

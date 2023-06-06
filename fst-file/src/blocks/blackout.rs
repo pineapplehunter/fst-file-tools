@@ -16,7 +16,7 @@ pub struct BlackoutRecord {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct BlackoutBlock {
+pub struct BlackoutContent {
     records: Vec<BlackoutRecord>,
 }
 
@@ -26,13 +26,13 @@ fn parse_record(input: &[u8]) -> FstFileResult<'_, BlackoutRecord> {
     Ok((input, BlackoutRecord { active, time_delta }))
 }
 
-pub fn parse_blackout_block(input: &[u8]) -> FstFileResult<'_, BlackoutBlock> {
+pub fn parse_blackout_content(input: &[u8]) -> FstFileResult<'_, BlackoutContent> {
     let (input, count) = map_res(parse_varint, |v| {
-        usize::try_from(v).map_err(|_e| BlockParseError::LengthTooLargeForMachine)
+        usize::try_from(v).map_err(|_e| (input,BlockParseError::LengthTooLargeForMachine))
     })(input)?;
     let (input, records) = many_m_n(count, count, parse_record)(input)?;
 
-    let data = BlackoutBlock { records };
+    let data = BlackoutContent { records };
 
     let (_input, _) = eof(input)?;
     Ok((input, data))

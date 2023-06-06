@@ -1,4 +1,5 @@
-use blocks::{parse_block, Block};
+use blocks::{header::HeaderBlock, hierarchy::HierarchyBlock, parse_block, Block};
+use data_types::BlockType;
 use error::{FstFileParseError, FstFileResult};
 use nom::{combinator::eof, error::context, multi::many_till, Finish, Offset};
 use serde::{
@@ -50,7 +51,7 @@ impl Serialize for BlockInfo<'_> {
     }
 }
 
-impl BlockInfo<'_> {
+impl<'a> BlockInfo<'a> {
     pub fn get_block_start_offset(&self) -> usize {
         self.file_offset
     }
@@ -58,15 +59,15 @@ impl BlockInfo<'_> {
         self.file_offset + 9
     }
     pub fn get_block_end_offset(&self) -> usize {
-        self.file_offset + self.block.len() - 1
+        self.file_offset + self.block.size() - 1
     }
     pub fn get_block_length(&self) -> usize {
-        self.block.len()
+        self.block.size()
     }
     pub fn get_data_length(&self) -> usize {
-        self.block.len() - 9
+        self.block.size() - 9
     }
-    pub fn get_block(&self) -> &Block {
+    pub fn get_block(&'a self) -> &'a Block {
         self.block
     }
 }
@@ -84,6 +85,25 @@ impl Blocks<'_> {
             index: 0,
             blocks: self,
         }
+    }
+
+    pub fn get_header_block(&self) -> Option<HeaderBlock> {
+        self.blocks
+            .iter()
+            .find(|b| b.block_type == BlockType::Header)
+            .map(HeaderBlock)
+    }
+
+    pub fn get_hierarchy_block(&self) -> Option<HierarchyBlock> {
+        self.blocks
+            .iter()
+            .find(|b| {
+                matches!(
+                    b.block_type,
+                    BlockType::HierarchyGz | BlockType::HierarchyLz4 | BlockType::HierarchyLz4Duo
+                )
+            })
+            .map(HierarchyBlock::from_block)
     }
 }
 

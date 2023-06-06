@@ -1,9 +1,10 @@
 use nom::{
     bytes::complete::{take, take_while},
-    error::{ErrorKind, ParseError},
-    IResult,
+    error::ErrorKind,
 };
 use thiserror::Error;
+
+use crate::error::FstFileResult;
 
 pub type VarInt = u64;
 pub type SVarInt = i64;
@@ -16,40 +17,9 @@ pub enum VarIntParseErrorKind {
     NomError(ErrorKind),
 }
 
-#[derive(Debug, Error)]
-pub struct VarIntParseError<I> {
-    pub errors: Vec<(I, VarIntParseErrorKind)>,
-}
-
-impl<I> ParseError<I> for VarIntParseError<I> {
-    fn from_error_kind(input: I, kind: ErrorKind) -> Self {
-        Self {
-            errors: vec![(input, VarIntParseErrorKind::NomError(kind))],
-        }
-    }
-
-    fn append(input: I, kind: ErrorKind, mut other: Self) -> Self {
-        other
-            .errors
-            .push((input, VarIntParseErrorKind::NomError(kind)));
-        other
-    }
-}
-
-impl<I, E> From<(I, E)> for VarIntParseError<I>
-where
-    E: Into<VarIntParseErrorKind>,
-{
-    fn from(value: (I, E)) -> Self {
-        VarIntParseError {
-            errors: vec![(value.0, value.1.into())],
-        }
-    }
-}
-
-pub fn parse_varint(input_original: &[u8]) -> IResult<&[u8], VarInt, VarIntParseError<&[u8]>> {
-    let input = input_original;
-    let (input, data) = take_while(|b| b & 0b100_0000 != 0)(input)?;
+pub fn parse_varint(input: &[u8]) -> FstFileResult<'_, VarInt> {
+    let input_original = input;
+    let (input, data) = take_while(|b| b & 0b1000_0000 != 0)(input)?;
     let (input, last) = take(1u8)(input)?;
     let mut val = 0;
     val += last[0] as u64;
@@ -79,5 +49,9 @@ mod test {
         let input = [0x01];
         let (_i, a) = parse_varint(&input).unwrap();
         assert_eq!(a, 1);
+
+        let input = [0x58];
+        let (_i, a) = parse_varint(&input).unwrap();
+        assert_eq!(a, 0x58);
     }
 }

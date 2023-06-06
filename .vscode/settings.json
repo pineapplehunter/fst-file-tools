@@ -1,7 +1,0 @@
-{
-    "rust-analyzer.linkedProjects": [
-        "./fst-file/Cargo.toml",
-        "./fst-file/Cargo.toml",
-        "./fst-file/Cargo.toml"
-    ]
-}

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt::{self},
     fs::{File, OpenOptions},
     io::{IsTerminal, Read, Write},
@@ -10,7 +11,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use fst_file::parse_file;
 use once_cell::sync::Lazy;
 use termion::color;
-use tracing::{debug, trace, Level};
+use tracing::{debug, error, trace, Level};
 use tracing_subscriber::EnvFilter;
 
 /// Simple program to greet a person
@@ -36,9 +37,9 @@ enum Commands {
     List {
         #[command(flatten)]
         common: CommonArgs,
-        /// output file format
+        /// output format
         #[arg(long, value_enum, default_value_t)]
-        output_format: OutputFormat,
+        format: OutputFormat,
     },
     Show {
         #[command(flatten)]
@@ -61,6 +62,30 @@ enum Commands {
         #[command(flatten)]
         common: CommonArgs,
     },
+    /// Counts blocks in FST file and displays it.
+    Stats {
+        #[command(flatten)]
+        common: CommonArgs,
+    },
+    /// Counts blocks in FST file and displays it.
+    Header {
+        #[command(flatten)]
+        common: CommonArgs,
+        /// output format
+        #[arg(long, value_enum, default_value_t)]
+        format: OutputFormat,
+    },
+    /// Shows Hierarchy
+    Hierarchy {
+        #[command(flatten)]
+        common: CommonArgs,
+        /// output format
+        #[arg(long, value_enum, default_value_t)]
+        format: OutputFormat,
+        /// show only tokens
+        #[arg(short, long, default_value_t = false)]
+        show_tokens: bool,
+    },
 }
 
 impl CliArgs {
@@ -70,6 +95,9 @@ impl CliArgs {
             Commands::Show { common, .. } => common,
             Commands::Dump { common, .. } => common,
             Commands::DumpAll { common } => common,
+            Commands::Stats { common } => common,
+            Commands::Header { common, .. } => common,
+            Commands::Hierarchy { common, .. } => common,
         }
     }
 }
@@ -102,12 +130,12 @@ fn main() {
     let args = CliArgs::parse();
     if let Some(level) = args.log_level {
         tracing_subscriber::fmt::fmt()
-            .with_writer(|| std::io::stderr())
+            .with_writer(std::io::stderr)
             .with_max_level(level)
             .init();
     } else {
         tracing_subscriber::fmt::fmt()
-            .with_writer(|| std::io::stderr())
+            .with_writer(std::io::stderr)
             .with_env_filter(EnvFilter::from_default_env())
             .init();
     }
@@ -123,7 +151,10 @@ fn main() {
     let blocks = parse_file(&contents).unwrap();
 
     match args.command {
-        Commands::List { output_format, .. } => match output_format {
+        Commands::List {
+            format: output_format,
+            ..
+        } => match output_format {
             OutputFormat::PlainText => {
                 for (idx, block) in blocks.iter().enumerate() {
                     println!(
@@ -190,5 +221,85 @@ fn main() {
                 .unwrap();
         }
         Commands::DumpAll { .. } => todo!(),
+        Commands::Stats { .. } => {
+            let mut data = HashMap::new();
+            for block in blocks.iter() {
+                let entry = data.entry(block.get_block().block_type).or_insert(0);
+                *entry += 1;
+            }
+            let mut v: Vec<_> = data.into_iter().collect();
+            v.sort_by(|(k1, _v1), (k2, _v2)| k1.cmp(k2));
+            let width = v.iter().map(|(k, _v)| k.to_string().len()).max().unwrap();
+            let width = width.max(10);
+            println!("{type_text:>width$} count", type_text = "block type",);
+            for (block_type, num) in v {
+                println!(
+                    "{bold}{block_type:>width$}{reset_style} {green}{num}{reset_color}",
+                    bold = termion::style::Bold.only_on_terminal(),
+                    reset_style = termion::style::Reset.only_on_terminal(),
+                    green = color::Fg(color::Green).only_on_terminal(),
+                    reset_color = color::Fg(color::Reset).only_on_terminal()
+                );
+            }
+        }
+        Commands::Header {
+            format: output_format,
+            ..
+        } => {
+            if let Some(header_block) = blocks.get_header_block() {
+                match header_block.get_content() {
+                    Ok(content) => match output_format {
+                        OutputFormat::PlainText => println!("{:#?}", content),
+
+                        OutputFormat::Json => {
+                            print!("{}", serde_json::to_string(&content).unwrap())
+                        }
+                        OutputFormat::PrettyJson => {
+                            println!("{}", serde_json::to_string_pretty(&content).unwrap())
+                        }
+                    },
+                    Err(e) => {
+                        error!("Error while parsing header content {:?}", e)
+                    }
+                }
+            } else {
+                error!("Header did not exist in file!");
+            }
+        }
+        Commands::Hierarchy {
+            format: output_format,
+            show_tokens,
+            ..
+        } => {
+            if let Some(hierarchy_block) = blocks.get_hierarchy_block() {
+                if show_tokens {
+                    match hierarchy_block.get_tokens() {
+                        Ok(content) => match output_format {
+                            OutputFormat::PlainText => {
+                                for (s, t) in content.iter() {
+                                    if s.length == 1 {
+                                        println!("[{}] {:#?}", s.from, t)
+                                    } else {
+                                        println!("[{}..{}] {:#?}", s.from, s.from + s.length - 1, t)
+                                    }
+                                }
+                            }
+
+                            OutputFormat::Json => {
+                                print!("{}", serde_json::to_string(&content).unwrap())
+                            }
+                            OutputFormat::PrettyJson => {
+                                println!("{}", serde_json::to_string_pretty(&content).unwrap())
+                            }
+                        },
+                        Err(e) => error!("Error while parsing header content {:?}", e),
+                    }
+                } else {
+                    todo!("show actual hierarchy")
+                }
+            } else {
+                error!("Hierarchy block did not exist in file!");
+            }
+        }
     }
 }
