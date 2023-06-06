@@ -1,6 +1,7 @@
 use enum_primitive_derive::Primitive;
 use serde::Serialize;
 
+/// Signal direction
 #[derive(Debug, Clone, PartialEq, Primitive, Serialize)]
 pub enum VarDir {
     Implicit = 0,

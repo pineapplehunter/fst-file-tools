@@ -1,6 +1,6 @@
 use nom::{branch::alt, bytes::complete::tag, combinator::map};
 
-use crate::error::FstFileResult;
+use crate::{error::FstFileResult, FstParsable};
 
 pub enum WriterPackType {
     Zlib,
@@ -8,8 +8,8 @@ pub enum WriterPackType {
     Lz4,
 }
 
-impl WriterPackType {
-    pub fn parse(input: &[u8]) -> FstFileResult<'_, Self> {
+impl FstParsable for WriterPackType {
+    fn parse(input: &[u8]) -> FstFileResult<'_, Self> {
         alt((
             map(tag(&[b'!']), |_| Self::Zlib),
             map(tag(&[b'Z']), |_| Self::Zlib),

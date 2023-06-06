@@ -15,8 +15,8 @@ use thiserror::Error;
 use tracing::{debug_span, warn};
 
 use crate::{
-    data_types::{parse_varint, AttributeType, MiscType, ScopeType, VarDir, VarInt, VarType},
-    error::{BlockParseError, FstFileParseError, FstFileResult},
+    data_types::{AttributeType, MiscType, ScopeType, VarDir, VarInt, VarType},
+    error::{BlockParseError, FstFileParseError, FstFileResult}, FstParsable,
 };
 
 use super::Block;
@@ -189,7 +189,7 @@ impl<'a> HierarchyBlock<'a> {
             CString::new(s).unwrap().to_string_lossy().to_string()
         })(input)?;
         let (input, _) = take(1u8)(input)?;
-        let (input, value) = parse_varint(input)?;
+        let (input, value) = VarInt::parse(input)?;
 
         Ok((
             input,
@@ -269,8 +269,8 @@ impl<'a> HierarchyBlock<'a> {
             CString::new(s).unwrap().to_string_lossy().to_string()
         })(input)?;
         let (input, _) = take(1u8)(input)?;
-        let (input, length_of_variable) = parse_varint(input)?;
-        let (input, alias_variable_id) = parse_varint(input)?;
+        let (input, length_of_variable) = VarInt::parse(input)?;
+        let (input, alias_variable_id) = VarInt::parse(input)?;
 
         Ok((
             input,
@@ -306,7 +306,7 @@ impl<'a> HierarchyBlock<'a> {
         Span::new(from, length)
     }
 
-    pub fn parse_structual_hierarchy(
+    fn parse_structual_hierarchy(
         input: &'a [(Span, HierarchyToken)],
     ) -> FstFileResult<'a, Scope, &'a [(Span, HierarchyToken)]> {
         let (input, t) = scope_begin(input)?;

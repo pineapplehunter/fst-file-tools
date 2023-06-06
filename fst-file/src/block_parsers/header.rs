@@ -2,8 +2,8 @@ use std::{cell::OnceCell, ffi::CStr};
 
 use nom::{
     bytes::complete::take,
-    combinator::{eof, map, map_res},
-    number::complete::{be_i64, be_i8, be_u64, be_u8, le_f64},
+    combinator::{eof, map_res},
+    number::complete::{be_i64, be_u64, be_u8, le_f64},
     Finish,
 };
 use num_traits::FromPrimitive;
@@ -13,6 +13,7 @@ use tracing::debug_span;
 use crate::{
     data_types::{FileType, TimeScale},
     error::{BlockParseError, FstFileParseError, FstFileResult},
+    FstParsable,
 };
 
 use super::Block;
@@ -46,7 +47,7 @@ impl<'a> HeaderBlock<'a> {
     fn get_content_cached(&'a self) -> &'a ContentResult<'a> {
         self.content.get_or_init(|| {
             let _span = debug_span!("caching header content").entered();
-            parse_header_content(self.block.data)
+            HeaderBlockContent::parse(self.block.data)
                 .finish()
                 .map(|(_, content)| content)
         })
@@ -64,47 +65,49 @@ impl<'a> HeaderBlock<'a> {
     }
 }
 
-pub fn parse_header_content(input: &[u8]) -> FstFileResult<'_, HeaderBlockContent> {
-    let (input, start_time) = be_u64(input)?;
-    let (input, end_time) = be_u64(input)?;
-    let (input, real_endianness) = le_f64(input)?;
-    assert!((real_endianness - std::f64::consts::E).abs() < std::f64::EPSILON);
-    let (input, writer_memory_use) = be_u64(input)?;
-    let (input, num_scopes) = be_u64(input)?;
-    let (input, num_hiearchy_vars) = be_u64(input)?;
-    let (input, num_vars) = be_u64(input)?;
-    let (input, num_vc_blocks) = be_u64(input)?;
-    let (input, timescale) = map(be_i8, TimeScale)(input)?;
-    let (input, writer) = map_res(take(128u32), |b: &[u8]| {
-        CStr::from_bytes_until_nul(b)
-            .map(|s| s.to_string_lossy().to_string())
-            .map_err(|_e| (input, BlockParseError::CStringParseError(b.to_vec())))
-    })(input)?;
-    let (input, date) = map_res(take(26u32), |b: &[u8]| {
-        CStr::from_bytes_until_nul(b)
-            .map(|s| s.to_string_lossy().to_string())
-            .map_err(|_e| (input, BlockParseError::CStringParseError(b.to_vec())))
-    })(input)?;
-    let (input, _reserved) = take(93u32)(input)?;
-    let (input, filetype) = map_res(be_u8, |i| {
-        FileType::from_u8(i).ok_or((input, BlockParseError::WrongFileType))
-    })(input)?;
-    let (input, timezero) = be_i64(input)?;
-    let data = HeaderBlockContent {
-        start_time,
-        end_time,
-        real_endianness,
-        writer_memory_use,
-        num_scopes,
-        num_hiearchy_vars,
-        num_vars,
-        num_vc_blocks,
-        timescale,
-        writer,
-        date,
-        filetype,
-        timezero,
-    };
-    let (input, _) = eof(input)?;
-    Ok((input, data))
+impl FstParsable for HeaderBlockContent {
+    fn parse(input: &[u8]) -> FstFileResult<'_, HeaderBlockContent> {
+        let (input, start_time) = be_u64(input)?;
+        let (input, end_time) = be_u64(input)?;
+        let (input, real_endianness) = le_f64(input)?;
+        assert!((real_endianness - std::f64::consts::E).abs() < std::f64::EPSILON);
+        let (input, writer_memory_use) = be_u64(input)?;
+        let (input, num_scopes) = be_u64(input)?;
+        let (input, num_hiearchy_vars) = be_u64(input)?;
+        let (input, num_vars) = be_u64(input)?;
+        let (input, num_vc_blocks) = be_u64(input)?;
+        let (input, timescale) = TimeScale::parse(input)?;
+        let (input, writer) = map_res(take(128u32), |b: &[u8]| {
+            CStr::from_bytes_until_nul(b)
+                .map(|s| s.to_string_lossy().to_string())
+                .map_err(|_e| (input, BlockParseError::CStringParseError(b.to_vec())))
+        })(input)?;
+        let (input, date) = map_res(take(26u32), |b: &[u8]| {
+            CStr::from_bytes_until_nul(b)
+                .map(|s| s.to_string_lossy().to_string())
+                .map_err(|_e| (input, BlockParseError::CStringParseError(b.to_vec())))
+        })(input)?;
+        let (input, _reserved) = take(93u32)(input)?;
+        let (input, filetype) = map_res(be_u8, |i| {
+            FileType::from_u8(i).ok_or((input, BlockParseError::WrongFileType))
+        })(input)?;
+        let (input, timezero) = be_i64(input)?;
+        let data = HeaderBlockContent {
+            start_time,
+            end_time,
+            real_endianness,
+            writer_memory_use,
+            num_scopes,
+            num_hiearchy_vars,
+            num_vars,
+            num_vc_blocks,
+            timescale,
+            writer,
+            date,
+            filetype,
+            timezero,
+        };
+        let (input, _) = eof(input)?;
+        Ok((input, data))
+    }
 }

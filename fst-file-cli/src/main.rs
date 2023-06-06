@@ -4,12 +4,12 @@ use std::{
     fs::{File, OpenOptions},
     io::{IsTerminal, Read, Write},
     path::PathBuf,
+    sync::OnceLock,
 };
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use fst_file::parse_file;
-use once_cell::sync::Lazy;
 use termion::color;
 use tracing::{debug, debug_span, error, metadata::LevelFilter, trace};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -118,6 +118,15 @@ enum Commands {
         #[arg(short, long, value_enum, default_value_t)]
         format: OutputFormat,
     },
+
+    /// Shows Geometry
+    Blackout {
+        #[command(flatten)]
+        common: CommonArgs,
+        /// output format
+        #[arg(short, long, value_enum, default_value_t)]
+        format: OutputFormat,
+    },
 }
 
 impl CliArgs {
@@ -131,6 +140,7 @@ impl CliArgs {
             Commands::Header { common, .. } => common,
             Commands::Hierarchy { common, .. } => common,
             Commands::Geometry { common, .. } => common,
+            Commands::Blackout { common, .. } => common,
         }
     }
 }
@@ -146,11 +156,15 @@ enum OutputFormat {
     PrettyJson,
 }
 
-static IS_TERMINAL: Lazy<bool> = Lazy::new(|| std::io::stdout().is_terminal());
+static IS_TERMINAL: OnceLock<bool> = OnceLock::new();
+
+fn is_terminal() -> &'static bool {
+    IS_TERMINAL.get_or_init(|| std::io::stdout().is_terminal())
+}
 trait OnlyOnTerminal: Sized + fmt::Display {
     fn only_on_terminal(&self) -> String {
         let mut s = Vec::new();
-        if *IS_TERMINAL {
+        if *is_terminal() {
             write!(s, "{}", self).unwrap();
         }
         String::from_utf8_lossy(&s).to_string()
@@ -360,6 +374,15 @@ fn main() {
             };
             match hierarchy_block.get_geometry() {
                 Ok(geom) => println!("{:?}", geom),
+                Err(e) => error!("Error while parsing header content {:?}", e),
+            }
+        }
+        Commands::Blackout { .. } => {
+            let Some(blackout_block) = blocks.get_blackout_block() else {
+                panic!("Geometry block did not exist in file!");
+            };
+            match blackout_block.get_content() {
+                Ok(content) => println!("{:?}", content),
                 Err(e) => error!("Error while parsing header content {:?}", e),
             }
         }

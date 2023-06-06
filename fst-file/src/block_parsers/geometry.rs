@@ -7,8 +7,9 @@ use nom::{
 use tracing::debug;
 
 use crate::{
-    data_types::{parse_varint, VarInt},
+    data_types::VarInt,
     error::{BlockParseError, FstFileParseError, FstFileResult},
+    FstParsable,
 };
 
 use super::Block;
@@ -32,18 +33,17 @@ impl<'a> GeometryBlock<'a> {
     }
 
     fn get_geometry_cache(&'a self) -> &GeometryResult {
-        self.geometry.get_or_init(|| {
-            self.parse_geometry(self.block.data)
-                .finish()
-                .map(|(_, v)| v)
-        })
+        self.geometry
+            .get_or_init(|| Geometry::parse(self.block.data).finish().map(|(_, v)| v))
     }
 
     pub fn get_geometry(&'a self) -> &GeometryResult {
         self.get_geometry_cache()
     }
+}
 
-    fn parse_geometry(&'a self, input: &'a [u8]) -> FstFileResult<'a, Geometry> {
+impl FstParsable for Geometry {
+    fn parse(input: &[u8]) -> FstFileResult<'_, Self> {
         let original_input = input;
         let (input, uncompressed_length) = map_res(be_u64, |v: u64| {
             usize::try_from(v).map_err(|_e| (input, BlockParseError::LengthTooLargeForMachine))
@@ -65,7 +65,7 @@ impl<'a> GeometryBlock<'a> {
         }
 
         let (_, g) = context("inner data", |input| {
-            many_m_n(count, count, parse_varint)(input)
+            many_m_n(count, count, VarInt::parse)(input)
         })(&data[..])
         .expect("something went wrong while parsing geometry data");
 

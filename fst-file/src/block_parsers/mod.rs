@@ -3,17 +3,19 @@ use std::{fmt, io::Read};
 use nom::{combinator::map, multi::length_data, number::complete::be_u64};
 use tracing::warn;
 
-use crate::{
-    data_types::{parse_block_type, BlockType},
-    error::FstFileResult,
-};
+use crate::{data_types::BlockType, error::FstFileResult, FstParsable};
 
+/// Blackout Block
 pub mod blackout;
+/// Geometry Block
 pub mod geometry;
+/// Header Block
 pub mod header;
+/// Hierarchy Block
 pub mod hierarchy;
 // pub mod value_change_data;
 
+/// Abstract block struct that only holds the type of block ([BlockType]) and location of data (&[[u8]])
 #[derive(Clone)]
 pub struct Block<'a> {
     pub block_type: BlockType,
@@ -75,6 +77,8 @@ impl Block<'_> {
         data2
     }
 
+    /// Extracts data from block.
+    /// If the block content is compressed, it will be uncompressed in this function.
     pub fn extract_data(&self) -> Vec<u8> {
         match self.block_type {
             BlockType::Header => self.data.to_vec(),
@@ -91,10 +95,13 @@ impl Block<'_> {
         }
     }
 
+    /// Get the raw underlying data bytes.
+    /// Useful when calculating offsets from another place in the file.
     pub fn get_data_raw(&self) -> &[u8] {
         self.data
     }
 
+    /// Size of Block
     pub fn size(&self) -> usize {
         self.data.len() + 9
     }
@@ -103,8 +110,8 @@ impl Block<'_> {
         map(be_u64, |v| v - 8)(input)
     }
 
-    pub fn parse_block(input: &[u8]) -> FstFileResult<'_, Block> {
-        let (input, block_type) = parse_block_type(input)?;
+    pub(crate) fn parse_block(input: &[u8]) -> FstFileResult<'_, Block> {
+        let (input, block_type) = BlockType::parse(input)?;
         let (input, data) = length_data(Block::parse_block_length)(input)?;
         let block = Block { block_type, data };
         Ok((input, block))

@@ -5,7 +5,10 @@ use nom::{bytes::complete::take, combinator::map_res};
 use num_traits::FromPrimitive;
 use serde::Serialize;
 
-use crate::error::{BlockParseError, FstFileResult};
+use crate::{
+    error::{BlockParseError, FstFileResult},
+    FstParsable,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Primitive, Serialize, Hash, PartialOrd, Ord)]
 #[repr(u8)]
@@ -52,10 +55,12 @@ impl fmt::Display for BlockType {
     }
 }
 
-pub fn parse_block_type(input: &[u8]) -> FstFileResult<'_, BlockType> {
-    map_res(take(1u32), |data: &[u8]| {
-        BlockType::from_u8(data[0]).ok_or((data, BlockParseError::BlockTypeUnknown(data[0])))
-    })(input)
+impl FstParsable for BlockType {
+    fn parse(input: &[u8]) -> FstFileResult<'_, Self> {
+        map_res(take(1u32), |data: &[u8]| {
+            Self::from_u8(data[0]).ok_or((data, BlockParseError::BlockTypeUnknown(data[0])))
+        })(input)
+    }
 }
 
 #[cfg(test)]
@@ -63,18 +68,19 @@ mod test {
     use nom::Finish;
 
     use crate::{
-        data_types::{parse_block_type, BlockType},
+        data_types::BlockType,
         error::{BlockParseError, FstFileParseErrorInner},
+        FstParsable,
     };
 
     #[test]
     fn test_parse_block_type() {
-        let data = parse_block_type(&[1]);
+        let data = BlockType::parse(&[1]);
         let empty: &[u8] = &[];
         assert_eq!(data.unwrap(), (empty, BlockType::ValueChangeData));
 
         let input = [250];
-        let e = parse_block_type(&input).finish().err().unwrap();
+        let e = BlockType::parse(&input).finish().err().unwrap();
         assert_eq!(e.errors.len(), 2);
         assert_eq!(
             e.errors[0].1,

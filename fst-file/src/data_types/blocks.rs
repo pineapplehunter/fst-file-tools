@@ -3,7 +3,8 @@ use serde::{ser::SerializeSeq, Serialize};
 
 use crate::{
     block_parsers::{
-        geometry::GeometryBlock, header::HeaderBlock, hierarchy::HierarchyBlock, Block,
+        blackout::BlackoutBlock, geometry::GeometryBlock, header::HeaderBlock,
+        hierarchy::HierarchyBlock, Block,
     },
     data_types::BlockType,
 };
@@ -70,6 +71,13 @@ impl Blocks<'_> {
             .iter()
             .find(|b| b.block_type == BlockType::Geometry)
             .map(GeometryBlock::from_block)
+    }
+
+    pub fn get_blackout_block(&self) -> Option<BlackoutBlock> {
+        self.blocks
+            .iter()
+            .find(|b| b.block_type == BlockType::Blackout)
+            .map(|b| BlackoutBlock::from_block(b))
     }
 }
 
