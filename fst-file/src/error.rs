@@ -91,4 +91,4 @@ impl<I> ContextError<I> for FstFileParseError<I> {
     }
 }
 
-pub type FstFileResult<'a, T> = IResult<&'a [u8], T, FstFileParseError<&'a [u8]>>;
+pub type FstFileResult<'a, T, I = &'a [u8]> = IResult<I, T, FstFileParseError<I>>;

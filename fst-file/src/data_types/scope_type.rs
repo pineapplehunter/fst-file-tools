@@ -1,7 +1,8 @@
 use enum_primitive_derive::Primitive;
 use serde::Serialize;
 
-#[derive(Debug, Clone, PartialEq, Primitive, Serialize)]
+#[derive(Debug, Clone, PartialEq, Primitive, Serialize, Copy)]
+#[repr(u8)]
 pub enum ScopeType {
     VcdModule = 0,
     VcdTask = 1,

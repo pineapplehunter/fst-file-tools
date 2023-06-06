@@ -296,12 +296,12 @@ fn main() {
                             let _span = debug_span!("printing hierarchy tokens");
                             match output_format {
                                 OutputFormat::PlainText => {
-                                    for (s, t) in content.iter() {
+                                    for (idx,(s, t)) in content.iter().enumerate() {
                                         if s.length == 1 {
-                                            println!("[{}] {:#?}", s.from, t)
+                                            println!("#{idx} [{}] {:#?}", s.from, t)
                                         } else {
                                             println!(
-                                                "[{}..{}] {:#?}",
+                                                "#{idx} [{}..{}] {:#?}",
                                                 s.from,
                                                 s.from + s.length - 1,
                                                 t
@@ -320,7 +320,23 @@ fn main() {
                         Err(e) => error!("Error while parsing header content {:?}", e),
                     }
                 } else {
-                    todo!("show actual hierarchy")
+                    match hierarchy_block.get_hierarchy() {
+                        Ok(hierarchy) => {
+                            let _span = debug_span!("printing hierarchy");
+                            match output_format {
+                                OutputFormat::PlainText => {
+                                    println!("{hierarchy:#?}")
+                                }
+                                OutputFormat::Json => {
+                                    print!("{}", serde_json::to_string(&hierarchy).unwrap())
+                                }
+                                OutputFormat::PrettyJson => {
+                                    println!("{}", serde_json::to_string_pretty(&hierarchy).unwrap())
+                                }
+                            }
+                        }
+                        Err(e) => error!("Error while parsing header content {:?}", e),
+                    }
                 }
             } else {
                 error!("Hierarchy block did not exist in file!");
