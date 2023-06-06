@@ -1,2 +1,3 @@
 [workspace]
-members = ["fst-file","fst-file-cli"]
+resolver = "2"
+members = ["fst-file", "fst-file-cli"]

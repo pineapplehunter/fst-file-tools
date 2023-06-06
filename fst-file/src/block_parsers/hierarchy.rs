@@ -1,6 +1,5 @@
 use std::{cell::OnceCell, ffi::CString};
 
-use enum_primitive_derive::Primitive;
 use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while},
@@ -12,20 +11,72 @@ use nom::{
 use num_traits::FromPrimitive;
 use serde::Serialize;
 use thiserror::Error;
-use tracing::warn;
+use tracing::{debug_span, warn};
 
 use crate::{
-    data_types::{parse_varint, VarInt},
+    data_types::{parse_varint, AttributeType, MiscType, ScopeType, VarDir, VarInt, VarType},
     error::{BlockParseError, FstFileParseError, FstFileResult},
 };
 
 use super::Block;
 
+#[derive(Debug, Clone, Serialize)]
+
+pub enum HierarchyToken {
+    Attribute {
+        attr_type: AttributeType,
+        misc_type: MiscType,
+        name: String,
+        value: VarInt,
+    },
+    AttributeEnd,
+    ScopeBegin {
+        scope_type: ScopeType,
+        name: String,
+        component: String,
+    },
+    ScopeEnd,
+    Vcd {
+        var_type: VarType,
+        direction: VarDir,
+        name: String,
+        length_of_variable: VarInt,
+        alias_variable_id: VarInt,
+    },
+    Unknown(u8),
+}
+
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum HierarchyParseErrorKind {
+    #[error("misc type was wrong on attribute. the value was {0}")]
+    WrongMiscType(u8),
+    #[error("scope type was wrong on scope. the value was {0}")]
+    WrongScopeType(u8),
+    #[error("var type was wrong. the value was {0}")]
+    WrongVarType(u8),
+    #[error("var dir was wrong. the value was {0}")]
+    WrongVarDir(u8),
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct Span {
+    pub from: usize,
+    pub length: usize,
+}
+
+impl Span {
+    fn new(from: usize, length: usize) -> Self {
+        Self { from, length }
+    }
+}
+
+type TokensResult<'a> = Result<Vec<(Span, HierarchyToken)>, FstFileParseError<&'a [u8]>>;
+
 #[derive(Clone)]
 pub struct HierarchyBlock<'a> {
     block: &'a Block<'a>,
     uncompressed_data: OnceCell<Vec<u8>>,
-    tokens: OnceCell<Result<Vec<(Span, HierarchyToken)>, FstFileParseError<&'a [u8]>>>,
+    tokens: OnceCell<TokensResult<'a>>,
 }
 
 impl<'a> HierarchyBlock<'a> {
@@ -42,10 +93,9 @@ impl<'a> HierarchyBlock<'a> {
             .get_or_init(|| self.block.extract_data())
     }
 
-    fn get_tokens_cache(
-        &'a self,
-    ) -> &Result<Vec<(Span, HierarchyToken)>, FstFileParseError<&[u8]>> {
+    fn get_tokens_cache(&'a self) -> &TokensResult<'a> {
         self.tokens.get_or_init(|| {
+            let _span = debug_span!("caching hierarchy tokens").entered();
             let data = self.get_uncompressed_data_cache();
             self.parse_tokens(data).finish().map(|(_, tokens)| tokens)
         })
@@ -55,7 +105,7 @@ impl<'a> HierarchyBlock<'a> {
         self.get_uncompressed_data_cache().offset(data)
     }
 
-    pub fn get_tokens(&'a self) -> &Result<Vec<(Span, HierarchyToken)>, FstFileParseError<&[u8]>> {
+    pub fn get_tokens(&'a self) -> &TokensResult<'a> {
         self.get_tokens_cache()
     }
 
@@ -202,152 +252,5 @@ impl<'a> HierarchyBlock<'a> {
         let from = self.get_uncompressed_data_cache().offset(start);
         let length = start.offset(end);
         Span::new(from, length)
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-
-pub enum HierarchyToken {
-    Attribute {
-        attr_type: AttributeType,
-        misc_type: MiscType,
-        name: String,
-        value: VarInt,
-    },
-    AttributeEnd,
-    ScopeBegin {
-        scope_type: ScopeType,
-        name: String,
-        component: String,
-    },
-    ScopeEnd,
-    Vcd {
-        var_type: VarType,
-        direction: VarDir,
-        name: String,
-        length_of_variable: VarInt,
-        alias_variable_id: VarInt,
-    },
-    Unknown(u8),
-}
-
-#[derive(Debug, Clone, PartialEq, Primitive, Serialize)]
-#[repr(u8)]
-pub enum AttributeType {
-    Misc = 0,
-    Array = 1,
-    Enum = 2,
-    Pack = 3,
-}
-
-#[derive(Debug, Clone, PartialEq, Primitive, Serialize)]
-#[repr(u8)]
-pub enum MiscType {
-    Comment = 0,
-    EnvVar = 1,
-    SupVar = 2,
-    PathName = 3,
-    SourceStem = 4,
-    SourceIStem = 5,
-    ValueList = 6,
-    EnumTable = 7,
-    Unknown = 8,
-}
-
-#[derive(Debug, Clone, PartialEq, Primitive, Serialize)]
-pub enum ScopeType {
-    VcdModule = 0,
-    VcdTask = 1,
-    VcdFunction = 2,
-    VcdBegin = 3,
-    VcdFork = 4,
-    VcdGenerate = 5,
-    VcdStruct = 6,
-    VcdUnion = 7,
-    VcdClass = 8,
-    VcdInterface = 9,
-    VcdPackage = 10,
-    VcdProgram = 11,
-    VhdlArchitecture = 12,
-    VhdlProcedure = 13,
-    VhdlFunction = 14,
-    VhdlRecord = 15,
-    VhdlProcess = 16,
-    VhdlBlock = 17,
-    VhdlGorGenerate = 18,
-    VhdlIfGenerate = 19,
-    VhdlGenerate = 20,
-    VhdlPackage = 21,
-    GenAttrBegin = 252,
-    GenAttrEnd = 253,
-    VcdScope = 254,
-    VcdUnScope = 255,
-}
-
-#[derive(Debug, Clone, PartialEq, Primitive, Serialize)]
-pub enum VarType {
-    VcdEvent = 0,
-    VcdInteger = 1,
-    VcdParameter = 2,
-    VcdReal = 3,
-    VcdRealParameter = 4,
-    VcdReg = 5,
-    VcdSupply0 = 6,
-    VcdSupply1 = 7,
-    VcdTime = 8,
-    VcdTri = 9,
-    VcdTriAnd = 10,
-    VcdTriOr = 11,
-    VcdTriReg = 12,
-    VcdTri0 = 13,
-    VcdTri1 = 14,
-    VcdWand = 15,
-    VcdWire = 16,
-    VcdWor = 17,
-    VcdPort = 18,
-    VcdSparray = 19,
-    VcdRealtime = 20,
-    GenString = 21,
-    SvBit = 22,
-    SvLogic = 23,
-    SvInt = 24,
-    SvShortInt = 25,
-    SvLongInt = 26,
-    SvByte = 27,
-    SvEnum = 28,
-    SvShortReal = 29,
-}
-
-#[derive(Debug, Clone, PartialEq, Primitive, Serialize)]
-pub enum VarDir {
-    Implicit = 0,
-    Input = 1,
-    Output = 2,
-    Inout = 3,
-    Buffer = 4,
-    Linkage = 5,
-}
-
-#[derive(Debug, Clone, PartialEq, Error)]
-pub enum HierarchyParseErrorKind {
-    #[error("misc type was wrong on attribute. the value was {0}")]
-    WrongMiscType(u8),
-    #[error("scope type was wrong on scope. the value was {0}")]
-    WrongScopeType(u8),
-    #[error("var type was wrong. the value was {0}")]
-    WrongVarType(u8),
-    #[error("var dir was wrong. the value was {0}")]
-    WrongVarDir(u8),
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub struct Span {
-    pub from: usize,
-    pub length: usize,
-}
-
-impl Span {
-    fn new(from: usize, length: usize) -> Self {
-        Self { from, length }
     }
 }

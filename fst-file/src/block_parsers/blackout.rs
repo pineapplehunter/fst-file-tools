@@ -28,7 +28,7 @@ fn parse_record(input: &[u8]) -> FstFileResult<'_, BlackoutRecord> {
 
 pub fn parse_blackout_content(input: &[u8]) -> FstFileResult<'_, BlackoutContent> {
     let (input, count) = map_res(parse_varint, |v| {
-        usize::try_from(v).map_err(|_e| (input,BlockParseError::LengthTooLargeForMachine))
+        usize::try_from(v).map_err(|_e| (input, BlockParseError::LengthTooLargeForMachine))
     })(input)?;
     let (input, records) = many_m_n(count, count, parse_record)(input)?;
 

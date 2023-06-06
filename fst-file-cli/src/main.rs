@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fmt::{self},
+    fmt,
     fs::{File, OpenOptions},
     io::{IsTerminal, Read, Write},
     path::PathBuf,
@@ -11,8 +11,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use fst_file::parse_file;
 use once_cell::sync::Lazy;
 use termion::color;
-use tracing::{debug, error, trace, Level};
-use tracing_subscriber::EnvFilter;
+use tracing::{debug, debug_span, error, metadata::LevelFilter, trace};
+use tracing_subscriber::fmt::format::FmtSpan;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -21,8 +21,32 @@ struct CliArgs {
     #[command(subcommand)]
     command: Commands,
     /// log level
-    #[arg(long)]
-    log_level: Option<Level>,
+    #[arg(global = true, short, long, value_enum, default_value_t)]
+    log_level: ArgLevel,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum ArgLevel {
+    Trace,
+    Debug,
+    Info,
+    #[default]
+    Warn,
+    Error,
+    Off,
+}
+
+impl From<ArgLevel> for LevelFilter {
+    fn from(value: ArgLevel) -> LevelFilter {
+        match value {
+            ArgLevel::Trace => LevelFilter::TRACE,
+            ArgLevel::Debug => LevelFilter::DEBUG,
+            ArgLevel::Info => LevelFilter::INFO,
+            ArgLevel::Warn => LevelFilter::WARN,
+            ArgLevel::Error => LevelFilter::ERROR,
+            ArgLevel::Off => LevelFilter::OFF,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -38,7 +62,7 @@ enum Commands {
         #[command(flatten)]
         common: CommonArgs,
         /// output format
-        #[arg(long, value_enum, default_value_t)]
+        #[arg(short, long, value_enum, default_value_t)]
         format: OutputFormat,
     },
     Show {
@@ -72,7 +96,7 @@ enum Commands {
         #[command(flatten)]
         common: CommonArgs,
         /// output format
-        #[arg(long, value_enum, default_value_t)]
+        #[arg(short, long, value_enum, default_value_t)]
         format: OutputFormat,
     },
     /// Shows Hierarchy
@@ -80,7 +104,7 @@ enum Commands {
         #[command(flatten)]
         common: CommonArgs,
         /// output format
-        #[arg(long, value_enum, default_value_t)]
+        #[arg(short, long, value_enum, default_value_t)]
         format: OutputFormat,
         /// show only tokens
         #[arg(short, long, default_value_t = false)]
@@ -128,17 +152,11 @@ impl<T> OnlyOnTerminal for T where T: fmt::Display {}
 
 fn main() {
     let args = CliArgs::parse();
-    if let Some(level) = args.log_level {
-        tracing_subscriber::fmt::fmt()
-            .with_writer(std::io::stderr)
-            .with_max_level(level)
-            .init();
-    } else {
-        tracing_subscriber::fmt::fmt()
-            .with_writer(std::io::stderr)
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
-    }
+    tracing_subscriber::fmt::fmt()
+        .with_writer(std::io::stderr)
+        .with_max_level(args.log_level)
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .init();
 
     trace!("start of cli");
     debug!("cli arguments {args:?}");
@@ -274,24 +292,31 @@ fn main() {
             if let Some(hierarchy_block) = blocks.get_hierarchy_block() {
                 if show_tokens {
                     match hierarchy_block.get_tokens() {
-                        Ok(content) => match output_format {
-                            OutputFormat::PlainText => {
-                                for (s, t) in content.iter() {
-                                    if s.length == 1 {
-                                        println!("[{}] {:#?}", s.from, t)
-                                    } else {
-                                        println!("[{}..{}] {:#?}", s.from, s.from + s.length - 1, t)
+                        Ok(content) => {
+                            let _span = debug_span!("printing hierarchy tokens");
+                            match output_format {
+                                OutputFormat::PlainText => {
+                                    for (s, t) in content.iter() {
+                                        if s.length == 1 {
+                                            println!("[{}] {:#?}", s.from, t)
+                                        } else {
+                                            println!(
+                                                "[{}..{}] {:#?}",
+                                                s.from,
+                                                s.from + s.length - 1,
+                                                t
+                                            )
+                                        }
                                     }
                                 }
+                                OutputFormat::Json => {
+                                    print!("{}", serde_json::to_string(&content).unwrap())
+                                }
+                                OutputFormat::PrettyJson => {
+                                    println!("{}", serde_json::to_string_pretty(&content).unwrap())
+                                }
                             }
-
-                            OutputFormat::Json => {
-                                print!("{}", serde_json::to_string(&content).unwrap())
-                            }
-                            OutputFormat::PrettyJson => {
-                                println!("{}", serde_json::to_string_pretty(&content).unwrap())
-                            }
-                        },
+                        }
                         Err(e) => error!("Error while parsing header content {:?}", e),
                     }
                 } else {

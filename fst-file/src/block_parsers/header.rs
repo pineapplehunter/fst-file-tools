@@ -1,4 +1,4 @@
-use std::ffi::CStr;
+use std::{cell::OnceCell, ffi::CStr};
 
 use nom::{
     bytes::complete::take,
@@ -8,6 +8,7 @@ use nom::{
 };
 use num_traits::FromPrimitive;
 use serde::Serialize;
+use tracing::debug_span;
 
 use crate::{
     data_types::{FileType, TimeScale},
@@ -33,14 +34,33 @@ pub struct HeaderBlockContent {
     pub timezero: i64,
 }
 
-#[derive(Debug, Clone)]
-pub struct HeaderBlock<'a>(pub(crate) &'a Block<'a>);
+type ContentResult<'a> = Result<HeaderBlockContent, FstFileParseError<&'a [u8]>>;
 
-impl HeaderBlock<'_> {
-    pub fn get_content(&self) -> Result<HeaderBlockContent, FstFileParseError<&[u8]>> {
-        parse_header_content(self.0.data)
-            .finish()
-            .map(|(_, content)| content)
+#[derive(Debug, Clone)]
+pub struct HeaderBlock<'a> {
+    block: &'a Block<'a>,
+    content: OnceCell<ContentResult<'a>>,
+}
+
+impl<'a> HeaderBlock<'a> {
+    fn get_content_cached(&'a self) -> &'a ContentResult<'a> {
+        self.content.get_or_init(|| {
+            let _span = debug_span!("caching header content").entered();
+            parse_header_content(self.block.data)
+                .finish()
+                .map(|(_, content)| content)
+        })
+    }
+
+    pub fn get_content(&'a self) -> &'a ContentResult<'a> {
+        self.get_content_cached()
+    }
+
+    pub fn from_block(block: &'a Block<'a>) -> Self {
+        Self {
+            block,
+            content: OnceCell::new(),
+        }
     }
 }
 

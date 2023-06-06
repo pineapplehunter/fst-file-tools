@@ -103,6 +103,17 @@ impl Block<'_> {
     pub fn size(&self) -> usize {
         self.data.len() + 9
     }
+
+    fn parse_block_length(input: &[u8]) -> FstFileResult<'_, u64> {
+        map(be_u64, |v| v - 8)(input)
+    }
+
+    pub fn parse_block(input: &[u8]) -> FstFileResult<'_, Block> {
+        let (input, block_type) = parse_block_type(input)?;
+        let (input, data) = length_data(Block::parse_block_length)(input)?;
+        let block = Block { block_type, data };
+        Ok((input, block))
+    }
 }
 
 impl fmt::Debug for Block<'_> {
@@ -112,15 +123,4 @@ impl fmt::Debug for Block<'_> {
             .field("data.len()", &self.data.len())
             .finish()
     }
-}
-
-fn parse_block_length(input: &[u8]) -> FstFileResult<'_, u64> {
-    map(be_u64, |v| v - 8)(input)
-}
-
-pub fn parse_block(input: &[u8]) -> FstFileResult<'_, Block> {
-    let (input, block_type) = parse_block_type(input)?;
-    let (input, data) = length_data(parse_block_length)(input)?;
-    let block = Block { block_type, data };
-    Ok((input, block))
 }
