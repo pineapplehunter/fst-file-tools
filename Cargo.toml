@@ -8,4 +8,4 @@ edition = "2021"
 fst-file = {path = "fst-file"}
 
 [workspace]
-members = ["fst-file"]
+members = ["fst-file","fst-file-cli"]

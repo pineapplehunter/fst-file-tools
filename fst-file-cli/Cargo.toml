@@ -1,0 +1,11 @@
+[package]
+name = "fst-file-cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+clap = { version = "4.3.2", features = ["derive"] }
+fst-file = { path = "../fst-file" }
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }

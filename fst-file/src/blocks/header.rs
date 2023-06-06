@@ -12,8 +12,13 @@ use crate::{
     error::{BlockParseError, FstFileResult},
 };
 
+#[derive(Debug, Clone)]
+pub struct HeaderBlock<'a> {
+    data: &'a [u8],
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub struct HeaderBlock {
+pub struct HeaderBlockContent {
     pub start_time: u64,
     pub end_time: u64,
     pub real_endianness: f64,
@@ -29,7 +34,7 @@ pub struct HeaderBlock {
     pub timezero: i64,
 }
 
-pub fn parse_header_block(input: &[u8]) -> FstFileResult<'_, HeaderBlock> {
+pub fn parse_header_block(input: &[u8]) -> FstFileResult<'_, HeaderBlockContent> {
     let (input, start_time) = be_u64(input)?;
     let (input, end_time) = be_u64(input)?;
     let (input, real_endianness) = le_f64(input)?;
@@ -40,12 +45,12 @@ pub fn parse_header_block(input: &[u8]) -> FstFileResult<'_, HeaderBlock> {
     let (input, num_vars) = be_u64(input)?;
     let (input, num_vc_blocks) = be_u64(input)?;
     let (input, timescale) = be_i8(input)?;
-    let (input, writer) = map_res(take(128u32), |b| {
+    let (input, writer) = map_res(take(128u32), |b: &[u8]| {
         CStr::from_bytes_until_nul(b)
             .map(|s| s.to_string_lossy().to_string())
             .map_err(|_e| BlockParseError::CStringParseError(b.to_vec()))
     })(input)?;
-    let (input, date) = map_res(take(26u32), |b| {
+    let (input, date) = map_res(take(26u32), |b: &[u8]| {
         CStr::from_bytes_until_nul(b)
             .map(|s| s.to_string_lossy().to_string())
             .map_err(|_e| BlockParseError::CStringParseError(b.to_vec()))
@@ -55,7 +60,7 @@ pub fn parse_header_block(input: &[u8]) -> FstFileResult<'_, HeaderBlock> {
         FileType::from_u8(i).ok_or(BlockParseError::WrongFileType)
     })(input)?;
     let (input, timezero) = be_i64(input)?;
-    let data = HeaderBlock {
+    let data = HeaderBlockContent {
         start_time,
         end_time,
         real_endianness,

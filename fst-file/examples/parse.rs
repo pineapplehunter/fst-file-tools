@@ -10,9 +10,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // println!("{input:?}");
     println!("{s:#?}");
 
-    let (input, s) = parse_file(&b).unwrap();
-    println!("{s:#?}");
-    println!("left {}", input.len());
+    let s = parse_file(&b).unwrap();
+    println!("{s}");
 
     Ok(())
 }

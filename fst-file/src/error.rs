@@ -4,6 +4,8 @@ use nom::{
 };
 use thiserror::Error;
 
+use crate::data_types::{VarIntParseError, VarIntParseErrorKind};
+
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum BlockParseError {
     #[error("block type unknown {0}")]
@@ -24,6 +26,8 @@ pub enum FstFileParseErrorInner {
     BlockParseError(#[from] BlockParseError),
     #[error("nom error of kind {0:?}")]
     NomError(ErrorKind),
+    #[error("var int parse error > {0}")]
+    VarIntParseError(#[from] VarIntParseErrorKind),
     #[error("context {0}")]
     Context(&'static str),
 }
@@ -54,19 +58,25 @@ impl<I> ParseError<I> for FstFileParseError<I> {
     }
 }
 
-impl<I> From<(I, FstFileParseErrorInner)> for FstFileParseError<I> {
-    fn from(value: (I, FstFileParseErrorInner)) -> Self {
+impl<I, E> From<(I, E)> for FstFileParseError<I>
+where
+    E: Into<FstFileParseErrorInner>,
+{
+    fn from(value: (I, E)) -> Self {
         Self {
-            errors: vec![value],
+            errors: vec![(value.0, value.1.into())],
         }
     }
 }
 
-impl<I, E: Into<FstFileParseErrorInner>> FromExternalError<I, E> for FstFileParseError<I> {
-    fn from_external_error(input: I, _kind: ErrorKind, e: E) -> Self {
-        Self {
-            errors: vec![(input, e.into())],
-        }
+impl<I, E> FromExternalError<I, E> for FstFileParseError<I>
+where
+    E: Into<FstFileParseError<I>>,
+{
+    fn from_external_error(input: I, kind: ErrorKind, e: E) -> Self {
+        let mut e = e.into();
+        e.errors.push((input, kind.into()));
+        e
     }
 }
 
