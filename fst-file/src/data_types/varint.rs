@@ -1,5 +1,3 @@
-use std::fmt;
-
 use nom::{
     bytes::complete::{take, take_while},
     error::{ErrorKind, ParseError},

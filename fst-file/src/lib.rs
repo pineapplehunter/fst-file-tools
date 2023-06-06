@@ -1,8 +1,10 @@
-use std::fmt;
-
 use blocks::{parse_block, Block};
 use error::{FstFileParseError, FstFileResult};
 use nom::{combinator::eof, error::context, multi::many_till, Finish, Offset};
+use serde::{
+    ser::{SerializeSeq, SerializeStruct},
+    Serialize,
+};
 
 pub mod blocks;
 pub mod data_types;
@@ -14,28 +16,89 @@ pub struct Blocks<'a> {
     blocks: Vec<Block<'a>>,
 }
 
-impl Blocks<'_> {
-    pub fn get(&self, index: usize) -> Option<&Block<'_>> {
-        self.blocks.get(index)
+impl Serialize for Blocks<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.blocks.len()))?;
+        for blockinfo in self.iter() {
+            seq.serialize_element(&blockinfo)?;
+        }
+        seq.end()
     }
 }
 
-impl fmt::Display for Blocks<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (idx, block) in self.blocks.iter().enumerate() {
-            let block_len = block.len();
-            let data_len = block_len - 9;
-            let start_of_data = self.start_of_input.offset(block.get_data_raw());
-            let start_of_block = start_of_data - 9;
-            let end_of_block = start_of_data + data_len;
-            writeln!(f, "Block#{idx} {}", block.block_type)?;
-            writeln!(f, "    block_len:      {block_len}")?;
-            writeln!(f, "    start of block: {start_of_block}",)?;
-            writeln!(f, "    data_len:       {data_len}")?;
-            writeln!(f, "    start of data:  {start_of_data}",)?;
-            writeln!(f, "    end:            {end_of_block}")?;
+pub struct BlockInfo<'a> {
+    file_offset: usize,
+    block: &'a Block<'a>,
+}
+
+impl Serialize for BlockInfo<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = serializer.serialize_struct("Block", 6)?;
+        map.serialize_field("type", &self.block.block_type)?;
+        map.serialize_field("block_offset", &self.get_block_start_offset())?;
+        map.serialize_field("block_length", &self.get_block_length())?;
+        map.serialize_field("data_offset", &self.get_data_start_offset())?;
+        map.serialize_field("data_length", &self.get_data_length())?;
+        map.serialize_field("block_end", &self.get_block_end_offset())?;
+        map.end()
+    }
+}
+
+impl BlockInfo<'_> {
+    pub fn get_block_start_offset(&self) -> usize {
+        self.file_offset
+    }
+    pub fn get_data_start_offset(&self) -> usize {
+        self.file_offset + 9
+    }
+    pub fn get_block_end_offset(&self) -> usize {
+        self.file_offset + self.block.len() - 1
+    }
+    pub fn get_block_length(&self) -> usize {
+        self.block.len()
+    }
+    pub fn get_data_length(&self) -> usize {
+        self.block.len() - 9
+    }
+    pub fn get_block(&self) -> &Block {
+        self.block
+    }
+}
+
+impl Blocks<'_> {
+    pub fn get(&self, index: usize) -> Option<BlockInfo<'_>> {
+        self.blocks.get(index).map(|block| BlockInfo {
+            file_offset: self.start_of_input.offset(block.get_data_raw()) - 9,
+            block,
+        })
+    }
+
+    pub fn iter(&self) -> BlocksIter {
+        BlocksIter {
+            index: 0,
+            blocks: self,
         }
-        Ok(())
+    }
+}
+
+pub struct BlocksIter<'a> {
+    index: usize,
+    blocks: &'a Blocks<'a>,
+}
+
+impl<'a> Iterator for BlocksIter<'a> {
+    type Item = BlockInfo<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let out = self.blocks.get(self.index)?;
+        self.index += 1;
+        Some(out)
     }
 }
 

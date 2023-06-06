@@ -3,10 +3,11 @@ use std::fmt::{self, Debug};
 use enum_primitive_derive::Primitive;
 use nom::{bytes::complete::take, combinator::map_res};
 use num_traits::FromPrimitive;
+use serde::Serialize;
 
 use crate::error::{BlockParseError, FstFileResult};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Primitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Primitive, Serialize)]
 #[repr(u8)]
 pub enum BlockType {
     #[doc(alias = "FST_BL_HDR")]
@@ -73,9 +74,8 @@ mod test {
         assert_eq!(data.unwrap(), (empty, BlockType::ValueChangeData));
 
         let input = [250];
-
         let e = parse_block_type(&input).finish().err().unwrap();
-        assert_eq!(e.errors.len(), 1);
+        assert_eq!(e.errors.len(), 2);
         assert_eq!(
             e.errors[0].1,
             FstFileParseErrorInner::BlockParseError(BlockParseError::BlockTypeUnknown(250))

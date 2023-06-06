@@ -4,7 +4,7 @@ use nom::{
 };
 use thiserror::Error;
 
-use crate::data_types::{VarIntParseError, VarIntParseErrorKind};
+use crate::data_types::{VarIntParseErrorKind};
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum BlockParseError {
