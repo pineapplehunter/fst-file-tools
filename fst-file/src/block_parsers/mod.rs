@@ -9,8 +9,10 @@ use crate::{
 };
 
 pub mod blackout;
+pub mod geometry;
 pub mod header;
 pub mod hierarchy;
+// pub mod value_change_data;
 
 #[derive(Clone)]
 pub struct Block<'a> {

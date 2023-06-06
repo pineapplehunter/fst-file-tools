@@ -9,6 +9,7 @@ mod timescale;
 mod var_dir;
 mod var_type;
 mod varint;
+mod writer_pack_type;
 
 pub use attribute_type::*;
 pub use blockinfo::*;
@@ -21,3 +22,4 @@ pub use timescale::*;
 pub use var_dir::*;
 pub use var_type::*;
 pub use varint::*;
+pub use writer_pack_type::*;

@@ -2,7 +2,9 @@ use nom::Offset;
 use serde::{ser::SerializeSeq, Serialize};
 
 use crate::{
-    block_parsers::{header::HeaderBlock, hierarchy::HierarchyBlock, Block},
+    block_parsers::{
+        geometry::GeometryBlock, header::HeaderBlock, hierarchy::HierarchyBlock, Block,
+    },
     data_types::BlockType,
 };
 
@@ -61,6 +63,13 @@ impl Blocks<'_> {
                 )
             })
             .map(HierarchyBlock::from_block)
+    }
+
+    pub fn get_geometry_block(&self) -> Option<GeometryBlock> {
+        self.blocks
+            .iter()
+            .find(|b| b.block_type == BlockType::Geometry)
+            .map(GeometryBlock::from_block)
     }
 }
 

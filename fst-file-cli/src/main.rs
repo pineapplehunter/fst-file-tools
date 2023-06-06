@@ -110,6 +110,14 @@ enum Commands {
         #[arg(short, long, default_value_t = false)]
         show_tokens: bool,
     },
+    /// Shows Geometry
+    Geometry {
+        #[command(flatten)]
+        common: CommonArgs,
+        /// output format
+        #[arg(short, long, value_enum, default_value_t)]
+        format: OutputFormat,
+    },
 }
 
 impl CliArgs {
@@ -122,6 +130,7 @@ impl CliArgs {
             Commands::Stats { common } => common,
             Commands::Header { common, .. } => common,
             Commands::Hierarchy { common, .. } => common,
+            Commands::Geometry { common, .. } => common,
         }
     }
 }
@@ -296,7 +305,7 @@ fn main() {
                             let _span = debug_span!("printing hierarchy tokens");
                             match output_format {
                                 OutputFormat::PlainText => {
-                                    for (idx,(s, t)) in content.iter().enumerate() {
+                                    for (idx, (s, t)) in content.iter().enumerate() {
                                         if s.length == 1 {
                                             println!("#{idx} [{}] {:#?}", s.from, t)
                                         } else {
@@ -331,7 +340,10 @@ fn main() {
                                     print!("{}", serde_json::to_string(&hierarchy).unwrap())
                                 }
                                 OutputFormat::PrettyJson => {
-                                    println!("{}", serde_json::to_string_pretty(&hierarchy).unwrap())
+                                    println!(
+                                        "{}",
+                                        serde_json::to_string_pretty(&hierarchy).unwrap()
+                                    )
                                 }
                             }
                         }
@@ -340,6 +352,15 @@ fn main() {
                 }
             } else {
                 error!("Hierarchy block did not exist in file!");
+            }
+        }
+        Commands::Geometry { .. } => {
+            let Some(hierarchy_block) = blocks.get_geometry_block() else {
+                panic!("Geometry block did not exist in file!");
+            };
+            match hierarchy_block.get_geometry() {
+                Ok(geom) => println!("{:?}", geom),
+                Err(e) => error!("Error while parsing header content {:?}", e),
             }
         }
     }
