@@ -6,6 +6,7 @@ use nom::{
     multi::many_m_n,
     Finish,
 };
+use serde::Serialize;
 
 use crate::{
     data_types::VarInt,
@@ -46,14 +47,14 @@ impl<'a> BlackoutBlock<'a> {
 }
 
 /// Record of blackout
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BlackoutRecord {
     active: bool,
     time_delta: VarInt,
 }
 
 /// Content of blackout block
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BlackoutContent {
     records: Vec<BlackoutRecord>,
 }

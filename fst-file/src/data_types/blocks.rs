@@ -11,7 +11,7 @@ use crate::{
 
 use super::BlockInfo;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Blocks<'a> {
     pub(crate) start_of_input: &'a [u8],
     pub(crate) blocks: Vec<Block<'a>>,
@@ -77,7 +77,7 @@ impl Blocks<'_> {
         self.blocks
             .iter()
             .find(|b| b.block_type == BlockType::Blackout)
-            .map(|b| BlackoutBlock::from_block(b))
+            .map(BlackoutBlock::from_block)
     }
 }
 

@@ -2,17 +2,17 @@ use std::{cell::OnceCell, ffi::CStr};
 
 use nom::{
     bytes::complete::take,
-    combinator::{eof, map_res},
-    number::complete::{be_i64, be_u64, be_u8, le_f64},
+    combinator::eof,
+    number::complete::{be_i64, be_u64, le_f64},
+    sequence::tuple,
     Finish,
 };
-use num_traits::FromPrimitive;
 use serde::Serialize;
 use tracing::debug_span;
 
 use crate::{
     data_types::{FileType, TimeScale},
-    error::{BlockParseError, FstFileParseError, FstFileResult},
+    error::{FstFileParseError, FstFileResult},
     FstParsable,
 };
 
@@ -25,7 +25,7 @@ pub struct HeaderBlockContent {
     pub real_endianness: f64,
     pub writer_memory_use: u64,
     pub num_scopes: u64,
-    pub num_hiearchy_vars: u64,
+    pub num_hierarchy_vars: u64,
     pub num_vars: u64,
     pub num_vc_blocks: u64,
     pub timescale: TimeScale,
@@ -67,38 +67,48 @@ impl<'a> HeaderBlock<'a> {
 
 impl FstParsable for HeaderBlockContent {
     fn parse(input: &[u8]) -> FstFileResult<'_, HeaderBlockContent> {
-        let (input, start_time) = be_u64(input)?;
-        let (input, end_time) = be_u64(input)?;
-        let (input, real_endianness) = le_f64(input)?;
+        let (
+            input,
+            (
+                start_time,
+                end_time,
+                real_endianness,
+                writer_memory_use,
+                num_scopes,
+                num_hierarchy_vars,
+                num_vars,
+                num_vc_blocks,
+                timescale,
+                writer,
+                date,
+                _,
+                filetype,
+                timezero,
+            ),
+        ) = tuple((
+            be_u64,
+            be_u64,
+            le_f64,
+            be_u64,
+            be_u64,
+            be_u64,
+            be_u64,
+            be_u64,
+            TimeScale::parse,
+            c_str_with_size(128),
+            c_str_with_size(26),
+            take(93u8),
+            FileType::parse,
+            be_i64,
+        ))(input)?;
         assert!((real_endianness - std::f64::consts::E).abs() < std::f64::EPSILON);
-        let (input, writer_memory_use) = be_u64(input)?;
-        let (input, num_scopes) = be_u64(input)?;
-        let (input, num_hiearchy_vars) = be_u64(input)?;
-        let (input, num_vars) = be_u64(input)?;
-        let (input, num_vc_blocks) = be_u64(input)?;
-        let (input, timescale) = TimeScale::parse(input)?;
-        let (input, writer) = map_res(take(128u32), |b: &[u8]| {
-            CStr::from_bytes_until_nul(b)
-                .map(|s| s.to_string_lossy().to_string())
-                .map_err(|_e| (input, BlockParseError::CStringParseError(b.to_vec())))
-        })(input)?;
-        let (input, date) = map_res(take(26u32), |b: &[u8]| {
-            CStr::from_bytes_until_nul(b)
-                .map(|s| s.to_string_lossy().to_string())
-                .map_err(|_e| (input, BlockParseError::CStringParseError(b.to_vec())))
-        })(input)?;
-        let (input, _reserved) = take(93u32)(input)?;
-        let (input, filetype) = map_res(be_u8, |i| {
-            FileType::from_u8(i).ok_or((input, BlockParseError::WrongFileType))
-        })(input)?;
-        let (input, timezero) = be_i64(input)?;
         let data = HeaderBlockContent {
             start_time,
             end_time,
             real_endianness,
             writer_memory_use,
             num_scopes,
-            num_hiearchy_vars,
+            num_hierarchy_vars,
             num_vars,
             num_vc_blocks,
             timescale,
@@ -109,5 +119,18 @@ impl FstParsable for HeaderBlockContent {
         };
         let (input, _) = eof(input)?;
         Ok((input, data))
+    }
+}
+
+fn c_str_with_size<'a>(size: usize) -> impl Fn(&'a [u8]) -> FstFileResult<'a, String> {
+    move |input| {
+        let (input, data) = take(size)(input)?;
+        let mut v = data.to_vec();
+        v.push(0);
+        let s = CStr::from_bytes_until_nul(&v)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        Ok((input, s))
     }
 }

@@ -106,8 +106,8 @@ impl Block<'_> {
         self.data.len() + 9
     }
 
-    fn parse_block_length(input: &[u8]) -> FstFileResult<'_, u64> {
-        map(be_u64, |v| v - 8)(input)
+    fn parse_block_length(input: &[u8]) -> FstFileResult<'_, usize> {
+        map(be_u64, |v| (v - 8) as usize)(input)
     }
 
     pub(crate) fn parse_block(input: &[u8]) -> FstFileResult<'_, Block> {

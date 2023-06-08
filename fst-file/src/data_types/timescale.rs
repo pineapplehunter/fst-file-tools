@@ -27,6 +27,6 @@ impl fmt::Display for TimeScale {
 
 impl FstParsable for TimeScale {
     fn parse(input: &[u8]) -> crate::error::FstFileResult<'_, Self> {
-        map(be_i8, |v| TimeScale(v))(input)
+        map(be_i8, TimeScale)(input)
     }
 }

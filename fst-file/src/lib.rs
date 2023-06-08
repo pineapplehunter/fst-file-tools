@@ -1,7 +1,12 @@
 use block_parsers::Block;
 use data_types::Blocks;
-use error::{FstFileParseError, FstFileResult};
-use nom::{combinator::eof, error::context, multi::many_till, Finish};
+use error::{BlockParseError, FstFileParseError, FstFileResult};
+use nom::{
+    combinator::{eof, map_res},
+    error::context,
+    multi::many_till,
+    Finish,
+};
 
 /// Block data and their parsers
 pub mod block_parsers;
@@ -28,4 +33,17 @@ pub fn parse_file(input: &[u8]) -> Result<Blocks, FstFileParseError<&[u8]>> {
 pub(crate) trait FstParsable: Sized {
     /// parse data from &[[u8]] and give [Self]
     fn parse(input: &[u8]) -> FstFileResult<'_, Self>;
+}
+
+pub(crate) fn as_usize<'a, V, F>(f: F) -> impl Fn(&'a [u8]) -> FstFileResult<'a, usize>
+where
+    V: TryInto<usize>,
+    F: Fn(&'a [u8]) -> FstFileResult<'a, V>,
+{
+    move |input| {
+        map_res(&f, |v| {
+            v.try_into()
+                .map_err(|_e| (input,BlockParseError::LengthTooLargeForMachine))
+        })
+    }(input)
 }
