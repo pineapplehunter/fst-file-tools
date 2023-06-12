@@ -3,10 +3,7 @@ use nom::{combinator::map_res, error::context, number::complete::be_u8};
 use num_traits::FromPrimitive;
 use serde::Serialize;
 
-use crate::{
-    error::{ ParseResult},
-    FstParsable,
-};
+use crate::{error::ParseResult, FstParsable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Primitive)]
 #[repr(u8)]
