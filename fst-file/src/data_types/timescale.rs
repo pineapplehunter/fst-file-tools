@@ -1,9 +1,9 @@
 use std::fmt;
 
-use nom::{combinator::map, number::complete::be_i8};
+use nom::{combinator::map, error::context, number::complete::be_i8};
 use serde::Serialize;
 
-use crate::FstParsable;
+use crate::{error::ParseResult, FstParsable};
 
 /// Time scale of the waveform
 #[derive(Clone, Copy, Serialize)]
@@ -26,7 +26,7 @@ impl fmt::Display for TimeScale {
 }
 
 impl FstParsable for TimeScale {
-    fn parse(input: &[u8]) -> crate::error::FstFileResult<'_, Self> {
-        map(be_i8, TimeScale)(input)
+    fn parse(input: &[u8]) -> ParseResult<'_, Self> {
+        context("parse time scale", map(be_i8, TimeScale))(input)
     }
 }

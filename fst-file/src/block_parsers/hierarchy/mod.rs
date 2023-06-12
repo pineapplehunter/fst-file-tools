@@ -1,5 +1,3 @@
-use std::cell::OnceCell;
-
 use nom::{
     branch::alt,
     bytes::{
@@ -7,13 +5,13 @@ use nom::{
         streaming::take_while_m_n,
     },
     combinator::{eof, opt},
-    error::{ErrorKind, ParseError},
+    error::{ErrorKind, ParseError, VerboseError, VerboseErrorKind},
     multi::many_till,
-    Finish, IResult, Offset,
+    Finish, Offset,
 };
 use serde::Serialize;
 use thiserror::Error;
-use tracing::{debug_span, warn};
+use tracing::{debug, debug_span, trace, warn};
 
 mod attribute_type;
 mod misc_type;
@@ -28,12 +26,12 @@ pub use var_dir::*;
 pub use var_type::*;
 
 use crate::{
-    data_types::VarInt,
-    error::{FstFileParseError, FstFileResult},
+    data_types::{BlockType, VarInt},
+    error::{ParseResult, PositionError},
     FstParsable,
 };
 
-use super::Block;
+use super::{Block, DecompressError};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Vcd {
@@ -88,17 +86,17 @@ pub enum HierarchyParseErrorKind {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct Scope<'a> {
-    scope_type: &'a ScopeType,
-    name: &'a String,
-    component: &'a String,
-    attributes: Vec<&'a Attribute>,
-    signals: Vec<&'a Vcd>,
-    scopes: Vec<Scope<'a>>,
+pub struct Scope {
+    scope_type: ScopeType,
+    name: String,
+    component: String,
+    attributes: Vec<Attribute>,
+    signals: Vec<Vcd>,
+    scopes: Vec<Scope>,
 }
 
-impl<'a> Scope<'a> {
-    pub fn new(scope_type: &'a ScopeType, name: &'a String, component: &'a String) -> Self {
+impl Scope {
+    pub fn new(scope_type: ScopeType, name: String, component: String) -> Self {
         Self {
             scope_type,
             name,
@@ -110,89 +108,108 @@ impl<'a> Scope<'a> {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
-pub struct Span {
-    pub from: usize,
-    pub length: usize,
+type Span<'a> = (&'a [u8], &'a [u8]);
+
+// impl Span {
+//     fn new(from: usize, length: usize) -> Self {
+//         Self { from, length }
+//     }
+// }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HierarchyContent {
+    root_scope: Scope,
 }
 
-impl Span {
-    fn new(from: usize, length: usize) -> Self {
-        Self { from, length }
+#[derive(Debug, Clone)]
+pub struct HierarchyBlock(Block);
+impl HierarchyBlock {
+    pub(crate) fn from_block(block: Block) -> HierarchyBlock {
+        Self(block)
     }
-}
 
-type TokensResult<'a> = Result<Vec<(Span, HierarchyToken)>, FstFileParseError<&'a [u8]>>;
-type ScopeResult<'a> = Result<Scope<'a>, FstFileParseError<&'a [(Span, HierarchyToken)]>>;
-#[derive(Clone)]
-pub struct HierarchyBlock<'a> {
-    block: &'a Block<'a>,
-    uncompressed_data: OnceCell<Vec<u8>>,
-    tokens: OnceCell<TokensResult<'a>>,
-    root_scope: OnceCell<ScopeResult<'a>>,
-}
+    pub fn get_content(&self) -> Result<HierarchyContent, HierarchyBlockConvertError> {
+        let _span = debug_span!("get content").entered();
+        let tokens = self.get_tokens()?;
 
-impl<'a> HierarchyBlock<'a> {
-    pub(crate) fn from_block(block: &'a Block) -> Self {
-        Self {
-            block,
-            uncompressed_data: OnceCell::new(),
-            tokens: OnceCell::new(),
-            root_scope: OnceCell::new(),
+        let scope = HierarchyContent::parse_structual_hierarchy(&tokens)
+            .finish()
+            .map(|(_, v)| v)
+            .unwrap();
+
+        Ok(HierarchyContent { root_scope: scope })
+    }
+
+    pub fn get_tokens(
+        &self,
+    ) -> Result<Vec<(PosistionAndSize, HierarchyToken)>, HierarchyBlockConvertError> {
+        let _scope = debug_span!("get tokens").entered();
+        if !matches!(
+            self.0.block_type,
+            BlockType::HierarchyGz | BlockType::HierarchyLz4 | BlockType::HierarchyLz4Duo
+        ) {
+            return Err(HierarchyBlockConvertError::NotHierarchyBlock);
         }
-    }
 
-    fn get_uncompressed_data_cache(&self) -> &[u8] {
-        self.uncompressed_data
-            .get_or_init(|| self.block.extract_data())
-    }
+        let uncompressed_data = self.0.extract_data()?;
 
-    fn get_tokens_cache(&'a self) -> &TokensResult<'a> {
-        self.tokens.get_or_init(|| {
-            let _span = debug_span!("caching hierarchy tokens").entered();
-            let data = self.get_uncompressed_data_cache();
-            self.parse_tokens(data).finish().map(|(_, tokens)| tokens)
-        })
-    }
+        debug!(uncompressed_data_len = uncompressed_data.len());
 
-    fn get_hierarchy_cache(&'a self) -> &ScopeResult<'a> {
-        self.root_scope.get_or_init(|| {
-            let _span = debug_span!("caching hierarchy").entered();
-            let data = self.get_tokens_cache().as_ref().unwrap();
-            Self::parse_structual_hierarchy(&data[..])
-                .finish()
-                .map(|(_, scope)| scope)
-        })
+        let tokens = HierarchyContent::parse_tokens(&uncompressed_data)
+            .finish()
+            .map(|(_, tokens)| {
+                tokens
+                    .into_iter()
+                    .map(|((start, end), token)| {
+                        (
+                            PosistionAndSize {
+                                position: uncompressed_data[..].offset(start),
+                                size: start.offset(end),
+                            },
+                            token,
+                        )
+                    })
+                    .collect::<Vec<(PosistionAndSize, HierarchyToken)>>()
+            })
+            .map_err(|e| PositionError::from_verbose_parse_error(e, &uncompressed_data))?;
+        Ok(tokens)
     }
+}
 
-    pub fn offset_from_uncompressed_data(&self, data: &[u8]) -> usize {
-        self.get_uncompressed_data_cache().offset(data)
-    }
+#[derive(Debug, Error)]
+pub enum HierarchyBlockConvertError {
+    #[error("not a hierarchy block")]
+    NotHierarchyBlock,
+    #[error("error during parse of hierarchy {0}")]
+    TokenParseError(#[from] PositionError<VerboseErrorKind>),
+    #[error("error during uncompressing hierarchy data: {0}")]
+    DataDecompressError(#[from] DecompressError),
+}
 
-    pub fn get_tokens(&'a self) -> &TokensResult<'a> {
-        self.get_tokens_cache()
-    }
+#[derive(Debug, Serialize)]
+pub struct PosistionAndSize {
+    pub position: usize,
+    pub size: usize,
+}
 
-    pub fn get_hierarchy(&'a self) -> &ScopeResult<'a> {
-        self.get_hierarchy_cache()
-    }
-
-    fn parse_tokens(&'a self, input: &'a [u8]) -> FstFileResult<'_, Vec<(Span, HierarchyToken)>> {
+impl HierarchyContent {
+    fn parse_tokens(input: &[u8]) -> ParseResult<Vec<(Span, HierarchyToken)>> {
         let (input, (token, _)) = many_till(
             alt((
-                |i| self.parse_attr_begin(i),
-                |i| self.parse_attr_end(i),
-                |i| self.parse_scope_begin(i),
-                |i| self.parse_scope_end(i),
-                |i| self.parse_vcd(i),
-                |i| self.parse_unknown(i),
+                HierarchyContent::parse_attr_begin,
+                HierarchyContent::parse_attr_end,
+                HierarchyContent::parse_scope_begin,
+                HierarchyContent::parse_scope_end,
+                HierarchyContent::parse_vcd,
+                HierarchyContent::parse_unknown,
             )),
             eof,
         )(input)?;
         Ok((input, token))
     }
 
-    fn parse_attr_begin(&'a self, input: &'a [u8]) -> FstFileResult<'_, (Span, HierarchyToken)> {
+    fn parse_attr_begin(input: &[u8]) -> ParseResult<'_, (Span, HierarchyToken)> {
+        trace!("attr begin");
         let original_input = input;
         let (input, _) = tag(&[ScopeType::GenAttrBegin as u8])(input)?;
         let (input, attr_type) = AttributeType::parse(input)?;
@@ -203,7 +220,7 @@ impl<'a> HierarchyBlock<'a> {
         Ok((
             input,
             (
-                self.make_span(original_input, input),
+                (original_input, input),
                 HierarchyToken::Attribute(Attribute {
                     attr_type,
                     misc_type,
@@ -214,19 +231,18 @@ impl<'a> HierarchyBlock<'a> {
         ))
     }
 
-    fn parse_attr_end(&'a self, input: &'a [u8]) -> FstFileResult<'_, (Span, HierarchyToken)> {
+    fn parse_attr_end(input: &[u8]) -> ParseResult<(Span, HierarchyToken)> {
+        trace!("attr end");
         let original_input = input;
         let (input, _) = tag(&[ScopeType::GenAttrEnd as u8])(input)?;
         Ok((
             input,
-            (
-                self.make_span(original_input, input),
-                HierarchyToken::AttributeEnd,
-            ),
+            ((original_input, input), HierarchyToken::AttributeEnd),
         ))
     }
 
-    fn parse_scope_begin(&'a self, input: &'a [u8]) -> FstFileResult<'_, (Span, HierarchyToken)> {
+    fn parse_scope_begin(input: &[u8]) -> ParseResult<(Span, HierarchyToken)> {
+        trace!("scope begin");
         let original_input = input;
         let (input, _) = tag(&[ScopeType::VcdScope as u8])(input)?;
         let (input, scope_type) = ScopeType::parse(input)?;
@@ -236,7 +252,7 @@ impl<'a> HierarchyBlock<'a> {
         Ok((
             input,
             (
-                self.make_span(original_input, input),
+                (original_input, input),
                 HierarchyToken::ScopeBegin(ScopeBegin {
                     scope_type,
                     name,
@@ -246,19 +262,15 @@ impl<'a> HierarchyBlock<'a> {
         ))
     }
 
-    fn parse_scope_end(&'a self, input: &'a [u8]) -> FstFileResult<'_, (Span, HierarchyToken)> {
+    fn parse_scope_end(input: &[u8]) -> ParseResult<(Span, HierarchyToken)> {
+        trace!("scope end");
         let original_input = input;
         let (input, _) = tag(&[ScopeType::VcdUnScope as u8])(input)?;
-        Ok((
-            input,
-            (
-                self.make_span(original_input, input),
-                HierarchyToken::ScopeEnd,
-            ),
-        ))
+        Ok((input, ((original_input, input), HierarchyToken::ScopeEnd)))
     }
 
-    fn parse_vcd(&'a self, input: &'a [u8]) -> FstFileResult<'_, (Span, HierarchyToken)> {
+    fn parse_vcd(input: &[u8]) -> ParseResult<(Span, HierarchyToken)> {
+        trace!("vcd data");
         let original_input = input;
         let (input, var_type) = VarType::parse(input)?;
         let (input, direction) = VarDir::parse(input)?;
@@ -269,7 +281,7 @@ impl<'a> HierarchyBlock<'a> {
         Ok((
             input,
             (
-                self.make_span(original_input, input),
+                (original_input, input),
                 HierarchyToken::Vcd(Vcd {
                     var_type,
                     direction,
@@ -281,38 +293,29 @@ impl<'a> HierarchyBlock<'a> {
         ))
     }
 
-    fn parse_unknown(&'a self, input: &'a [u8]) -> FstFileResult<'_, (Span, HierarchyToken)> {
+    fn parse_unknown(input: &[u8]) -> ParseResult<(Span, HierarchyToken)> {
         let original_input = input;
         let (input, b) = take(1u8)(input)?;
         warn!("unknown byte while parsing hierarchy");
         Ok((
             input,
-            (
-                self.make_span(original_input, input),
-                HierarchyToken::Unknown(b[0]),
-            ),
+            ((original_input, input), HierarchyToken::Unknown(b[0])),
         ))
     }
 
-    fn make_span(&self, start: &[u8], end: &[u8]) -> Span {
-        let from = self.get_uncompressed_data_cache().offset(start);
-        let length = start.offset(end);
-        Span::new(from, length)
-    }
-
     fn parse_structual_hierarchy(
-        input: &'a [(Span, HierarchyToken)],
-    ) -> FstFileResult<'a, Scope, &'a [(Span, HierarchyToken)]> {
+        input: &[(PosistionAndSize, HierarchyToken)],
+    ) -> ParseResult<Scope, [(PosistionAndSize, HierarchyToken)]> {
         let (input, t) = scope_begin(input)?;
         let HierarchyToken::ScopeBegin(ScopeBegin { scope_type, name, component }) = t else {unreachable!()};
-        let mut scope = Scope::new(scope_type, name, component);
+        let mut scope = Scope::new(*scope_type, name.clone(), component.clone());
 
         let mut input = input;
         loop {
             let (input_t, t) = opt(attr_begin)(input)?;
             if let Some(HierarchyToken::Attribute(attribute)) = t {
                 input = input_t;
-                scope.attributes.push(attribute);
+                scope.attributes.push(attribute.clone());
                 continue;
             }
 
@@ -325,7 +328,7 @@ impl<'a> HierarchyBlock<'a> {
             let (input_t, t) = opt(vcd)(input)?;
             if let Some(HierarchyToken::Vcd(vcd)) = t {
                 input = input_t;
-                scope.signals.push(vcd);
+                scope.signals.push(vcd.clone());
                 continue;
             }
 
@@ -348,78 +351,86 @@ impl<'a> HierarchyBlock<'a> {
                 input = input_t;
                 break;
             }
-            return Err(nom::Err::Error(
-                (input, HierarchyParseErrorKind::Unreachable).into(),
-            ));
+            return Err(nom::Err::Error(VerboseError::from_error_kind(
+                input,
+                ErrorKind::IsNot,
+            )));
         }
         Ok((input, scope))
     }
 }
 
 fn attr_begin(
-    input: &[(Span, HierarchyToken)],
-) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
+    input: &[(PosistionAndSize, HierarchyToken)],
+) -> ParseResult<&HierarchyToken, [(PosistionAndSize, HierarchyToken)]> {
     token_condition(|t| matches!(t, HierarchyToken::Attribute(_)))(input)
 }
 
 fn attr_end(
-    input: &[(Span, HierarchyToken)],
-) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
+    input: &[(PosistionAndSize, HierarchyToken)],
+) -> ParseResult<&HierarchyToken, [(PosistionAndSize, HierarchyToken)]> {
     token(HierarchyToken::AttributeEnd)(input)
 }
 
 fn scope_begin(
-    input: &[(Span, HierarchyToken)],
-) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
+    input: &[(PosistionAndSize, HierarchyToken)],
+) -> ParseResult<&HierarchyToken, [(PosistionAndSize, HierarchyToken)]> {
     token_condition(|t| matches!(t, HierarchyToken::ScopeBegin(_)))(input)
 }
 
 fn vcd(
-    input: &[(Span, HierarchyToken)],
-) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
+    input: &[(PosistionAndSize, HierarchyToken)],
+) -> ParseResult<&HierarchyToken, [(PosistionAndSize, HierarchyToken)]> {
     token_condition(|t| matches!(t, HierarchyToken::Vcd(_)))(input)
 }
 
 fn unknown(
-    input: &[(Span, HierarchyToken)],
-) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
+    input: &[(PosistionAndSize, HierarchyToken)],
+) -> ParseResult<&HierarchyToken, [(PosistionAndSize, HierarchyToken)]> {
     token_condition(|t| matches!(t, HierarchyToken::Unknown(_)))(input)
 }
 
 fn scope_end(
-    input: &[(Span, HierarchyToken)],
-) -> FstFileResult<'_, &HierarchyToken, &[(Span, HierarchyToken)]> {
+    input: &[(PosistionAndSize, HierarchyToken)],
+) -> ParseResult<&HierarchyToken, [(PosistionAndSize, HierarchyToken)]> {
     token(HierarchyToken::ScopeEnd)(input)
 }
 
-fn token<'a, Error: ParseError<&'a [(Span, HierarchyToken)]>>(
+fn token<'a>(
     token: HierarchyToken,
-) -> impl Fn(&'a [(Span, HierarchyToken)]) -> IResult<&'a [(Span, HierarchyToken)], &HierarchyToken, Error>
-{
-    move |i: &'a [(Span, HierarchyToken)]| match &i[0] {
+) -> impl Fn(
+    &'a [(PosistionAndSize, HierarchyToken)],
+) -> ParseResult<'a, &'a HierarchyToken, [(PosistionAndSize, HierarchyToken)]> {
+    move |i: &[(PosistionAndSize, HierarchyToken)]| match &i[0] {
         t if t.1 == token => {
             let (t, rest) = i.split_first().unwrap();
             Ok((rest, &t.1))
         }
-        _ => Err(nom::Err::Error(Error::from_error_kind(i, ErrorKind::Eof))),
+        _ => Err(nom::Err::Error(VerboseError::from_error_kind(
+            i,
+            ErrorKind::Eof,
+        ))),
     }
 }
 
-fn token_condition<'a, Error: ParseError<&'a [(Span, HierarchyToken)]>>(
-    condition: impl Fn(&'a HierarchyToken) -> bool,
+fn token_condition<'a>(
+    condition: impl Fn(&HierarchyToken) -> bool,
 ) -> impl Fn(
-    &'a [(Span, HierarchyToken)],
-) -> IResult<&'a [(Span, HierarchyToken)], &'a HierarchyToken, Error> {
-    move |i: &'a [(Span, HierarchyToken)]| match &i[0] {
+    &'a [(PosistionAndSize, HierarchyToken)],
+) -> ParseResult<'a, &'a HierarchyToken, [(PosistionAndSize, HierarchyToken)]> {
+    move |i: &'a [(PosistionAndSize, HierarchyToken)]| match &i[0] {
         t if condition(&t.1) => {
             let (t, rest) = i.split_first().unwrap();
             Ok((rest, &t.1))
         }
-        _ => Err(nom::Err::Error(Error::from_error_kind(i, ErrorKind::Eof))),
+        _ => Err(nom::Err::Error(VerboseError::from_error_kind(
+            i,
+            ErrorKind::Eof,
+        ))),
     }
 }
 
-fn c_str_up_to_512(input: &[u8]) -> FstFileResult<'_, String> {
+fn c_str_up_to_512(input: &[u8]) -> ParseResult<'_, String> {
     let (input, raw_str) = take_while_m_n(0, 511, |c| c != 0)(input)?;
     // for the last 0
     let (input, _) = take(1u8)(input)?;

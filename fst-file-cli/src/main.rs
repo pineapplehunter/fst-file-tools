@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     fmt,
     fs::{File, OpenOptions},
@@ -9,7 +10,6 @@ use std::{
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use fst_file::parse_file;
 use termion::color;
 use tracing::{debug, debug_span, error, metadata::LevelFilter, trace};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -53,6 +53,9 @@ impl From<ArgLevel> for LevelFilter {
 struct CommonArgs {
     /// input fst file
     input_file: PathBuf,
+    /// output format
+    #[arg(short, long, value_enum, default_value_t)]
+    format: OutputFormat,
 }
 
 #[derive(Subcommand, Debug)]
@@ -61,9 +64,6 @@ enum Commands {
     List {
         #[command(flatten)]
         common: CommonArgs,
-        /// output format
-        #[arg(short, long, value_enum, default_value_t)]
-        format: OutputFormat,
     },
     Show {
         #[command(flatten)]
@@ -73,7 +73,7 @@ enum Commands {
     },
     /// Dump the contents of a block to a file.
     /// If the block data is compressed, it will first uncompress the data and dump the contents.
-    Dump {
+    DumpData {
         #[command(flatten)]
         common: CommonArgs,
         /// the index of the block to dump
@@ -95,17 +95,11 @@ enum Commands {
     Header {
         #[command(flatten)]
         common: CommonArgs,
-        /// output format
-        #[arg(short, long, value_enum, default_value_t)]
-        format: OutputFormat,
     },
     /// Shows Hierarchy
     Hierarchy {
         #[command(flatten)]
         common: CommonArgs,
-        /// output format
-        #[arg(short, long, value_enum, default_value_t)]
-        format: OutputFormat,
         /// show only tokens
         #[arg(short, long, default_value_t = false)]
         show_tokens: bool,
@@ -114,18 +108,17 @@ enum Commands {
     Geometry {
         #[command(flatten)]
         common: CommonArgs,
-        /// output format
-        #[arg(short, long, value_enum, default_value_t)]
-        format: OutputFormat,
     },
 
     /// Shows Geometry
     Blackout {
         #[command(flatten)]
         common: CommonArgs,
-        /// output format
-        #[arg(short, long, value_enum, default_value_t)]
-        format: OutputFormat,
+    },
+    /// Shows Value Cahnge Data
+    Vcd {
+        #[command(flatten)]
+        common: CommonArgs,
     },
 }
 
@@ -134,13 +127,14 @@ impl CliArgs {
         match &self.command {
             Commands::List { common, .. } => common,
             Commands::Show { common, .. } => common,
-            Commands::Dump { common, .. } => common,
+            Commands::DumpData { common, .. } => common,
             Commands::DumpAll { common } => common,
             Commands::Stats { common } => common,
             Commands::Header { common, .. } => common,
             Commands::Hierarchy { common, .. } => common,
             Commands::Geometry { common, .. } => common,
             Commands::Blackout { common, .. } => common,
+            Commands::Vcd { common } => common,
         }
     }
 }
@@ -162,18 +156,19 @@ fn is_terminal() -> &'static bool {
     IS_TERMINAL.get_or_init(|| std::io::stdout().is_terminal())
 }
 trait OnlyOnTerminal: Sized + fmt::Display {
-    fn only_on_terminal(&self) -> String {
-        let mut s = Vec::new();
+    fn only_on_terminal(&self) -> Cow<'static, str> {
         if *is_terminal() {
-            write!(s, "{}", self).unwrap();
+            Cow::Owned(format!("{}", self))
+        } else {
+            Cow::Borrowed("")
         }
-        String::from_utf8_lossy(&s).to_string()
     }
 }
 
 impl<T> OnlyOnTerminal for T where T: fmt::Display {}
 
-fn main() {
+fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
     let args = CliArgs::parse();
     tracing_subscriber::fmt::fmt()
         .with_writer(std::io::stderr)
@@ -186,71 +181,74 @@ fn main() {
 
     let common = args.get_common();
 
-    let mut file = File::open(&common.input_file).unwrap();
+    let mut file = File::open(&common.input_file)?;
     let mut contents = Vec::new();
-    file.read_to_end(&mut contents).unwrap();
-    let blocks = parse_file(&contents).unwrap();
+    file.read_to_end(&mut contents)?;
 
     match args.command {
         Commands::List {
-            format: output_format,
+            common: CommonArgs { format, .. },
             ..
-        } => match output_format {
-            OutputFormat::PlainText => {
-                for (idx, block) in blocks.iter().enumerate() {
-                    println!(
-                        "Block#{idx} {bold}{}{reset}",
-                        block.get_block().block_type,
-                        bold = termion::style::Bold.only_on_terminal(),
-                        reset = termion::style::Reset.only_on_terminal()
-                    );
-                    println!(
-                        "    block offset: {blue}{}{reset}",
-                        block.get_block_start_offset(),
-                        blue = color::Fg(color::Blue).only_on_terminal(),
-                        reset = color::Fg(color::Reset).only_on_terminal()
-                    );
-                    println!(
-                        "    block length: {yello}{}{reset}",
-                        block.get_block_length(),
-                        yello = color::Fg(color::Yellow).only_on_terminal(),
-                        reset = color::Fg(color::Reset).only_on_terminal()
-                    );
-                    println!(
-                        "    data offset:  {green}{}{reset}",
-                        block.get_block_start_offset() + 9,
-                        green = color::Fg(color::Green).only_on_terminal(),
-                        reset = color::Fg(color::Reset).only_on_terminal()
-                    );
-                    println!(
-                        "    data length:  {red}{}{reset}",
-                        block.get_data_length(),
-                        red = color::Fg(color::Red).only_on_terminal(),
-                        reset = color::Fg(color::Reset).only_on_terminal()
-                    );
-                    println!(
-                        "    block end:    {cyan}{}{reset}",
-                        block.get_block_end_offset(),
-                        cyan = color::Fg(color::Cyan).only_on_terminal(),
-                        reset = color::Fg(color::Reset).only_on_terminal()
-                    );
+        } => {
+            let blocks = fst_file::parse_raw_block_information(&contents).unwrap();
+            match format {
+                OutputFormat::PlainText => {
+                    for (idx, block) in blocks.iter().enumerate() {
+                        println!(
+                            "Block#{idx} {bold}{}{reset}",
+                            block.get_block().block_type,
+                            bold = termion::style::Bold.only_on_terminal(),
+                            reset = termion::style::Reset.only_on_terminal()
+                        );
+                        println!(
+                            "    block offset: {blue}{}{reset}",
+                            block.get_block_start_offset(),
+                            blue = color::Fg(color::Blue).only_on_terminal(),
+                            reset = color::Fg(color::Reset).only_on_terminal()
+                        );
+                        println!(
+                            "    block length: {yello}{}{reset}",
+                            block.get_block_length(),
+                            yello = color::Fg(color::Yellow).only_on_terminal(),
+                            reset = color::Fg(color::Reset).only_on_terminal()
+                        );
+                        println!(
+                            "    data offset:  {green}{}{reset}",
+                            block.get_block_start_offset() + 9,
+                            green = color::Fg(color::Green).only_on_terminal(),
+                            reset = color::Fg(color::Reset).only_on_terminal()
+                        );
+                        println!(
+                            "    data length:  {red}{}{reset}",
+                            block.get_data_length(),
+                            red = color::Fg(color::Red).only_on_terminal(),
+                            reset = color::Fg(color::Reset).only_on_terminal()
+                        );
+                        println!(
+                            "    block end:    {cyan}{}{reset}",
+                            block.get_block_end_offset(),
+                            cyan = color::Fg(color::Cyan).only_on_terminal(),
+                            reset = color::Fg(color::Reset).only_on_terminal()
+                        );
+                    }
+                }
+                OutputFormat::Json => {
+                    let json = serde_json::to_string(&blocks).unwrap();
+                    print!("{}", json);
+                }
+                OutputFormat::PrettyJson => {
+                    let json = serde_json::to_string_pretty(&blocks).unwrap();
+                    print!("{}", json);
                 }
             }
-            OutputFormat::Json => {
-                let json = serde_json::to_string(&blocks).unwrap();
-                print!("{}", json);
-            }
-            OutputFormat::PrettyJson => {
-                let json = serde_json::to_string_pretty(&blocks).unwrap();
-                print!("{}", json);
-            }
-        },
+        }
         Commands::Show { .. } => todo!(),
-        Commands::Dump {
+        Commands::DumpData {
             block_index,
             output_file: output,
             ..
         } => {
+            let blocks = fst_file::parse_raw_block_information(&contents).unwrap();
             let mut output_file = OpenOptions::new()
                 .create(true)
                 .write(true)
@@ -258,11 +256,12 @@ fn main() {
                 .unwrap();
             let block_info = blocks.get(block_index).unwrap();
             output_file
-                .write_all(&block_info.get_block().extract_data())
+                .write_all(&block_info.get_block().extract_data()?)
                 .unwrap();
         }
         Commands::DumpAll { .. } => todo!(),
         Commands::Stats { .. } => {
+            let blocks = fst_file::parse_raw_block_information(&contents).unwrap();
             let mut data = HashMap::new();
             for block in blocks.iter() {
                 let entry = data.entry(block.get_block().block_type).or_insert(0);
@@ -284,49 +283,48 @@ fn main() {
             }
         }
         Commands::Header {
-            format: output_format,
+            common: CommonArgs { format, .. },
             ..
         } => {
-            if let Some(header_block) = blocks.get_header_block() {
-                match header_block.get_content() {
-                    Ok(content) => match output_format {
-                        OutputFormat::PlainText => println!("{:#?}", content),
+            let blocks = fst_file::parse(&contents).unwrap();
+            let header_block = blocks.header;
+            match header_block.get_content() {
+                Ok(content) => match format {
+                    OutputFormat::PlainText => println!("{:#?}", content),
 
-                        OutputFormat::Json => {
-                            print!("{}", serde_json::to_string(&content).unwrap())
-                        }
-                        OutputFormat::PrettyJson => {
-                            println!("{}", serde_json::to_string_pretty(&content).unwrap())
-                        }
-                    },
-                    Err(e) => {
-                        error!("Error while parsing header content {:?}", e)
+                    OutputFormat::Json => {
+                        print!("{}", serde_json::to_string(&content).unwrap())
                     }
+                    OutputFormat::PrettyJson => {
+                        println!("{}", serde_json::to_string_pretty(&content).unwrap())
+                    }
+                },
+                Err(e) => {
+                    error!("Error while parsing header content {:?}", e)
                 }
-            } else {
-                error!("Header did not exist in file!");
             }
         }
         Commands::Hierarchy {
-            format: output_format,
+            common: CommonArgs { format, .. },
             show_tokens,
             ..
         } => {
-            if let Some(hierarchy_block) = blocks.get_hierarchy_block() {
+            let blocks = fst_file::parse(&contents).unwrap();
+            if let Some(hierarchy_block) = blocks.hierarchy {
                 if show_tokens {
                     match hierarchy_block.get_tokens() {
                         Ok(content) => {
                             let _span = debug_span!("printing hierarchy tokens");
-                            match output_format {
+                            match format {
                                 OutputFormat::PlainText => {
                                     for (idx, (s, t)) in content.iter().enumerate() {
-                                        if s.length == 1 {
-                                            println!("#{idx} [{}] {:#?}", s.from, t)
+                                        if s.size == 1 {
+                                            println!("#{idx} [{}] {:#?}", s.position, t)
                                         } else {
                                             println!(
                                                 "#{idx} [{}..{}] {:#?}",
-                                                s.from,
-                                                s.from + s.length - 1,
+                                                s.position,
+                                                s.position + s.size - 1,
                                                 t
                                             )
                                         }
@@ -343,10 +341,10 @@ fn main() {
                         Err(e) => error!("Error while parsing header content {:?}", e),
                     }
                 } else {
-                    match hierarchy_block.get_hierarchy() {
+                    match hierarchy_block.get_content() {
                         Ok(hierarchy) => {
                             let _span = debug_span!("printing hierarchy");
-                            match output_format {
+                            match format {
                                 OutputFormat::PlainText => {
                                     println!("{hierarchy:#?}")
                                 }
@@ -369,16 +367,18 @@ fn main() {
             }
         }
         Commands::Geometry { .. } => {
-            let Some(hierarchy_block) = blocks.get_geometry_block() else {
+            let blocks = fst_file::parse(&contents).unwrap();
+            let Some(hierarchy_block) = blocks.geometry else {
                 panic!("Geometry block did not exist in file!");
             };
-            match hierarchy_block.get_geometry() {
+            match hierarchy_block.get_content() {
                 Ok(geom) => println!("{:?}", geom),
                 Err(e) => error!("Error while parsing header content {:?}", e),
             }
         }
         Commands::Blackout { .. } => {
-            let Some(blackout_block) = blocks.get_blackout_block() else {
+            let blocks = fst_file::parse(&contents).unwrap();
+            let Some(blackout_block) = blocks.blackout else {
                 panic!("Geometry block did not exist in file!");
             };
             match blackout_block.get_content() {
@@ -386,5 +386,15 @@ fn main() {
                 Err(e) => error!("Error while parsing header content {:?}", e),
             }
         }
+        Commands::Vcd { .. } => {
+            let blocks = fst_file::parse(&contents).unwrap();
+            for vcd_block in blocks.value_change_data {
+                match vcd_block.get_content() {
+                    Ok(vcd) => println!("{:#?}", vcd),
+                    Err(e) => println!("Error! {}", e),
+                }
+            }
+        }
     }
+    Ok(())
 }

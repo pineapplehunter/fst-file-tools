@@ -1,11 +1,16 @@
-use block_parsers::Block;
-use data_types::Blocks;
-use error::{BlockParseError, FstFileParseError, FstFileResult};
+use block_parsers::{blackout::BlackoutBlock, hierarchy::HierarchyBlock, Block};
+use data_types::{BlockInfo, BlockType};
+use error::{ParseResult, PositionError};
 use nom::{
-    combinator::{eof, map_res},
-    error::context,
+    combinator::{eof, map, map_res},
+    error::{context, ErrorKind, ParseError, VerboseError, VerboseErrorKind},
     multi::many_till,
-    Finish,
+    Finish, IResult, Offset,
+};
+use tracing::{debug, debug_span};
+
+use crate::block_parsers::{
+    geometry::GeometryBlock, header::HeaderBlock, value_change_data::ValueChangeDataBlock,
 };
 
 /// Block data and their parsers
@@ -14,36 +19,122 @@ pub mod data_types;
 pub mod error;
 
 /// Parses blocks
-fn parse_blocks(input: &[u8]) -> FstFileResult<'_, Blocks> {
+fn parse_blocks(input: &[u8]) -> IResult<&[u8], Vec<BlockInfo>, VerboseError<&[u8]>> {
     let input_original = input;
-    let (input, (blocks, _)) = many_till(context("parse block", Block::parse_block), eof)(input)?;
-    let blocks = Blocks {
-        start_of_input: input_original,
-        blocks,
-    };
+    let (input, (blocks, _)) = many_till(
+        context(
+            "parse block",
+            map(Block::parse_block_with_position, |((s, e), b)| {
+                BlockInfo::from_offset_and_block(input_original.offset(s), s.offset(e) - 1, b)
+            }),
+        ),
+        eof,
+    )(input)?;
     Ok((input, blocks))
 }
 
+#[derive(Debug)]
+pub struct FstFileContent {
+    pub header: HeaderBlock,
+    pub hierarchy: Option<HierarchyBlock>,
+    pub blackout: Option<BlackoutBlock>,
+    pub geometry: Option<GeometryBlock>,
+    pub value_change_data: Vec<ValueChangeDataBlock>,
+}
+
 /// Parse the whole content of the fst file
-pub fn parse_file(input: &[u8]) -> Result<Blocks, FstFileParseError<&[u8]>> {
-    parse_blocks(input).finish().map(|(_, blocks)| blocks)
+pub fn parse_raw_block_information(
+    input: &[u8],
+) -> Result<Vec<BlockInfo>, PositionError<VerboseErrorKind>> {
+    parse_blocks(input)
+        .finish()
+        .map(|(_, blocks)| blocks)
+        .map_err(|e| PositionError::from_verbose_parse_error(e, input))
+}
+
+/// Parse the whole content of the fst file
+pub fn parse(input: &[u8]) -> Result<FstFileContent, PositionError<VerboseErrorKind>> {
+    let _span = debug_span!("parse content");
+    parse_blocks(input)
+        .finish()
+        .map_err(|e| PositionError::from_verbose_parse_error(e, input))
+        .map(|(_, blocks)| {
+            // let mut header_block = None;
+            let mut hierarchy = None;
+            let mut blackout = None;
+            let mut header = None;
+            let mut geometry = None;
+            let mut value_change_data_tmp = Vec::new();
+
+            for (i, block) in blocks.into_iter().enumerate() {
+                let block = block.take_block();
+                match block.block_type {
+                    BlockType::HierarchyGz
+                    | BlockType::HierarchyLz4
+                    | BlockType::HierarchyLz4Duo => {
+                        debug!("using hierarchy block from #{}", i);
+                        hierarchy = Some(HierarchyBlock::from_block(block))
+                    }
+                    BlockType::Blackout => {
+                        debug!("using blackout block from #{}", i);
+                        blackout = Some(BlackoutBlock::from_block(block))
+                    }
+                    BlockType::Skip => {}
+                    BlockType::Header => {
+                        debug!("using header block from #{}", i);
+                        header = Some(HeaderBlock::from_block(block))
+                    }
+                    BlockType::Geometry => {
+                        debug!("using geometry block from #{}", i);
+                        geometry = Some(GeometryBlock::from_block(block))
+                    }
+                    BlockType::ValueChangeData
+                    | BlockType::ValueChangeDataAlias
+                    | BlockType::ValueChangeDataAlias2 => {
+                        debug!("using value change data block from #{}", i);
+                        value_change_data_tmp.push(block);
+                    }
+                    _ => {}
+                }
+            }
+
+            let header = header.expect("header block did not exist");
+            let header_content = header.get_content().expect("could not get header content");
+            let value_change_data = value_change_data_tmp
+                .into_iter()
+                .map(|b| {
+                    ValueChangeDataBlock::from_block_and_header_data(b, header_content.num_vars)
+                })
+                .collect();
+
+            FstFileContent {
+                hierarchy,
+                blackout,
+                header,
+                geometry,
+                value_change_data,
+            }
+        })
 }
 
 /// Parsable types
 pub(crate) trait FstParsable: Sized {
     /// parse data from &[[u8]] and give [Self]
-    fn parse(input: &[u8]) -> FstFileResult<'_, Self>;
+    fn parse(input: &[u8]) -> ParseResult<'_, Self>;
 }
 
-pub(crate) fn as_usize<'a, V, F>(f: F) -> impl Fn(&'a [u8]) -> FstFileResult<'a, usize>
+pub(crate) fn as_usize<'a, V, F>(f: F) -> impl Fn(&'a [u8]) -> ParseResult<'a, usize>
 where
     V: TryInto<usize>,
-    F: Fn(&'a [u8]) -> FstFileResult<'a, V>,
+    F: Fn(&'a [u8]) -> ParseResult<'a, V>,
 {
     move |input| {
-        map_res(&f, |v| {
-            v.try_into()
-                .map_err(|_e| (input,BlockParseError::LengthTooLargeForMachine))
-        })
-    }(input)
+        context(
+            "as usize",
+            map_res(&f, |v| {
+                v.try_into()
+                    .map_err(|_| VerboseError::from_error_kind(input, ErrorKind::Digit))
+            }),
+        )(input)
+    }
 }

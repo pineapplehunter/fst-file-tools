@@ -1,9 +1,9 @@
 use enum_primitive_derive::Primitive;
-use nom::{combinator::map_res, number::complete::be_u8};
+use nom::{combinator::map_res, error::context, number::complete::be_u8};
 use num_traits::FromPrimitive;
 use serde::Serialize;
 
-use crate::{block_parsers::hierarchy::HierarchyParseErrorKind, FstParsable};
+use crate::{block_parsers::hierarchy::HierarchyParseErrorKind, error::ParseResult, FstParsable};
 
 #[derive(Debug, Clone, PartialEq, Primitive, Serialize, Copy)]
 #[repr(u8)]
@@ -37,9 +37,12 @@ pub enum ScopeType {
 }
 
 impl FstParsable for ScopeType {
-    fn parse(input: &[u8]) -> crate::error::FstFileResult<'_, Self> {
-        map_res(be_u8, |v| {
-            ScopeType::from_u8(v).ok_or((input, HierarchyParseErrorKind::WrongScopeType(v)))
-        })(input)
+    fn parse(input: &[u8]) -> ParseResult<Self> {
+        context(
+            "scope type",
+            map_res(be_u8, |v| {
+                ScopeType::from_u8(v).ok_or((input, HierarchyParseErrorKind::WrongScopeType(v)))
+            }),
+        )(input)
     }
 }

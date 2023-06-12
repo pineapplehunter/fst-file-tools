@@ -1,18 +1,21 @@
-use std::{cell::OnceCell, ffi::CStr};
+use std::ffi::CStr;
 
 use nom::{
     bytes::complete::take,
     combinator::eof,
+    error::VerboseErrorKind,
     number::complete::{be_i64, be_u64, le_f64},
     sequence::tuple,
     Finish,
 };
 use serde::Serialize;
+use thiserror::Error;
 use tracing::debug_span;
 
 use crate::{
+    as_usize,
     data_types::{FileType, TimeScale},
-    error::{FstFileParseError, FstFileResult},
+    error::{ParseResult, PositionError},
     FstParsable,
 };
 
@@ -26,7 +29,7 @@ pub struct HeaderBlockContent {
     pub writer_memory_use: u64,
     pub num_scopes: u64,
     pub num_hierarchy_vars: u64,
-    pub num_vars: u64,
+    pub num_vars: usize,
     pub num_vc_blocks: u64,
     pub timescale: TimeScale,
     pub writer: String,
@@ -35,38 +38,32 @@ pub struct HeaderBlockContent {
     pub timezero: i64,
 }
 
-type ContentResult<'a> = Result<HeaderBlockContent, FstFileParseError<&'a [u8]>>;
-
-#[derive(Debug, Clone)]
-pub struct HeaderBlock<'a> {
-    block: &'a Block<'a>,
-    content: OnceCell<ContentResult<'a>>,
+#[derive(Debug, Error)]
+pub enum HeaderParseError {
+    #[error("parse error: {0}")]
+    ParseError(#[from] PositionError<VerboseErrorKind>),
 }
 
-impl<'a> HeaderBlock<'a> {
-    fn get_content_cached(&'a self) -> &'a ContentResult<'a> {
-        self.content.get_or_init(|| {
-            let _span = debug_span!("caching header content").entered();
-            HeaderBlockContent::parse(self.block.data)
-                .finish()
-                .map(|(_, content)| content)
-        })
+#[derive(Debug, Clone)]
+pub struct HeaderBlock(Block);
+
+impl HeaderBlock {
+    pub fn from_block(block: Block) -> Self {
+        Self(block)
     }
 
-    pub fn get_content(&'a self) -> &'a ContentResult<'a> {
-        self.get_content_cached()
-    }
-
-    pub fn from_block(block: &'a Block<'a>) -> Self {
-        Self {
-            block,
-            content: OnceCell::new(),
-        }
+    pub fn get_content(&self) -> Result<HeaderBlockContent, HeaderParseError> {
+        let _span = debug_span!("get header content").entered();
+        let data = self.0.get_data_raw();
+        Ok(HeaderBlockContent::parse(data)
+            .finish()
+            .map(|(_, content)| content)
+            .map_err(|e| PositionError::from_verbose_parse_error(e, data))?)
     }
 }
 
 impl FstParsable for HeaderBlockContent {
-    fn parse(input: &[u8]) -> FstFileResult<'_, HeaderBlockContent> {
+    fn parse(input: &[u8]) -> ParseResult<HeaderBlockContent> {
         let (
             input,
             (
@@ -92,7 +89,7 @@ impl FstParsable for HeaderBlockContent {
             be_u64,
             be_u64,
             be_u64,
-            be_u64,
+            as_usize(be_u64),
             be_u64,
             TimeScale::parse,
             c_str_with_size(128),
@@ -122,7 +119,7 @@ impl FstParsable for HeaderBlockContent {
     }
 }
 
-fn c_str_with_size<'a>(size: usize) -> impl Fn(&'a [u8]) -> FstFileResult<'a, String> {
+fn c_str_with_size<'a>(size: usize) -> impl Fn(&'a [u8]) -> ParseResult<'a, String> {
     move |input| {
         let (input, data) = take(size)(input)?;
         let mut v = data.to_vec();

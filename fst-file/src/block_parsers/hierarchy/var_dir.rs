@@ -3,7 +3,7 @@ use nom::{combinator::map_res, number::complete::be_u8};
 use num_traits::FromPrimitive;
 use serde::Serialize;
 
-use crate::{block_parsers::hierarchy::HierarchyParseErrorKind, FstParsable};
+use crate::{block_parsers::hierarchy::HierarchyParseErrorKind, error::ParseResult, FstParsable};
 
 /// Signal direction
 #[derive(Debug, Clone, PartialEq, Primitive, Serialize)]
@@ -17,7 +17,7 @@ pub enum VarDir {
 }
 
 impl FstParsable for VarDir {
-    fn parse(input: &[u8]) -> crate::error::FstFileResult<'_, Self> {
+    fn parse(input: &[u8]) -> ParseResult<Self> {
         map_res(be_u8, |v| {
             VarDir::from_u8(v).ok_or((input, HierarchyParseErrorKind::WrongVarDir(v)))
         })(input)

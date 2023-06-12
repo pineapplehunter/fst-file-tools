@@ -1,48 +1,42 @@
-use std::cell::OnceCell;
-
 use nom::{
     bytes::complete::take,
     combinator::{eof, map, map_res},
+    error::VerboseErrorKind,
     multi::many_m_n,
     Finish,
 };
 use serde::Serialize;
+use thiserror::Error;
 
 use crate::{
     data_types::VarInt,
-    error::{BlockParseError, FstFileParseError, FstFileResult},
+    error::{BlockParseError, ParseResult, PositionError},
     FstParsable,
 };
 
 use super::Block;
 
-type BlackoutContentResult<'a> = Result<BlackoutContent, FstFileParseError<&'a [u8]>>;
+#[derive(Debug, Error)]
+pub enum BlackoutParseError {
+    #[error("parse error: {0}")]
+    ParseError(#[from] PositionError<VerboseErrorKind>),
+}
 
 /// Blackout Block
 #[derive(Debug, Clone)]
-pub struct BlackoutBlock<'a> {
-    block: &'a Block<'a>,
-    content: OnceCell<BlackoutContentResult<'a>>,
-}
+pub struct BlackoutBlock(Block);
 
-impl<'a> BlackoutBlock<'a> {
-    pub fn from_block(block: &'a Block) -> Self {
-        Self {
-            block,
-            content: OnceCell::new(),
-        }
+impl BlackoutBlock {
+    pub fn from_block(block: Block) -> Self {
+        Self(block)
     }
 
-    fn get_content_cache(&self) -> &BlackoutContentResult {
-        self.content.get_or_init(|| {
-            BlackoutContent::parse(self.block.data)
-                .finish()
-                .map(|(_, v)| v)
-        })
-    }
-
-    pub fn get_content(&self) -> &BlackoutContentResult {
-        self.get_content_cache()
+    pub fn get_content(&self) -> Result<BlackoutContent, BlackoutParseError> {
+        let data = self.0.get_data_raw();
+        Ok(BlackoutContent::parse(data)
+            .finish()
+            .map(|(_, v)| v)
+            .map_err(|e| PositionError::from_verbose_parse_error(e, data))?)
     }
 }
 
@@ -60,7 +54,7 @@ pub struct BlackoutContent {
 }
 
 impl FstParsable for BlackoutRecord {
-    fn parse(input: &[u8]) -> FstFileResult<'_, BlackoutRecord> {
+    fn parse(input: &[u8]) -> ParseResult<BlackoutRecord> {
         let (input, active) = map(take(1u8), |b: &[u8]| b[0] == 1)(input)?;
         let (input, time_delta) = VarInt::parse(input)?;
         Ok((input, BlackoutRecord { active, time_delta }))
@@ -68,7 +62,7 @@ impl FstParsable for BlackoutRecord {
 }
 
 impl FstParsable for BlackoutContent {
-    fn parse(input: &[u8]) -> FstFileResult<'_, BlackoutContent> {
+    fn parse(input: &[u8]) -> ParseResult<BlackoutContent> {
         let (input, count) = map_res(VarInt::parse, |v| {
             usize::try_from(v).map_err(|_e| (input, BlockParseError::LengthTooLargeForMachine))
         })(input)?;

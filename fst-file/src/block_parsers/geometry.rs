@@ -1,50 +1,53 @@
-use std::{borrow::Cow, cell::OnceCell, io::Read};
+use std::{borrow::Cow, io::Read};
 
 use nom::{
-    bytes::complete::take, error::context, multi::many_m_n, number::complete::be_u64, Finish,
+    bytes::complete::take,
+    error::{context, VerboseErrorKind},
+    multi::many_m_n,
+    number::complete::be_u64,
+    Finish,
 };
 use serde::Serialize;
+use thiserror::Error;
 use tracing::debug;
 
 use crate::{
     as_usize,
     data_types::VarInt,
-    error::{FstFileParseError, FstFileResult},
+    error::{ParseResult, PositionError},
     FstParsable,
 };
 
 use super::Block;
 
-type GeometryResult<'a> = Result<Geometry, FstFileParseError<&'a [u8]>>;
-
-pub struct GeometryBlock<'a> {
-    block: &'a Block<'a>,
-    geometry: OnceCell<GeometryResult<'a>>,
-}
+#[derive(Debug)]
+pub struct GeometryBlock(Block);
 
 #[derive(Debug, Serialize)]
 pub struct Geometry(Vec<VarInt>);
 
-impl<'a> GeometryBlock<'a> {
-    pub fn from_block(block: &'a Block) -> Self {
-        Self {
-            block,
-            geometry: OnceCell::new(),
-        }
+#[derive(Debug, Error)]
+pub enum GeometryParseError {
+    #[error("parse error {0}")]
+    ParseError(#[from] PositionError<VerboseErrorKind>),
+}
+
+impl GeometryBlock {
+    pub fn from_block(block: Block) -> Self {
+        Self(block)
     }
 
-    fn get_geometry_cache(&'a self) -> &GeometryResult {
-        self.geometry
-            .get_or_init(|| Geometry::parse(self.block.data).finish().map(|(_, v)| v))
-    }
-
-    pub fn get_geometry(&'a self) -> &GeometryResult {
-        self.get_geometry_cache()
+    pub fn get_content(&self) -> Result<Geometry, GeometryParseError> {
+        let data = self.0.get_data_raw();
+        Ok(Geometry::parse(data)
+            .finish()
+            .map(|(_, v)| v)
+            .map_err(|e| PositionError::from_verbose_parse_error(e, data))?)
     }
 }
 
 impl FstParsable for Geometry {
-    fn parse(input: &[u8]) -> FstFileResult<'_, Self> {
+    fn parse(input: &[u8]) -> ParseResult<Self> {
         let original_input = input;
         let (input, uncompressed_length) = as_usize(be_u64)(input)?;
         let (input, count) = as_usize(be_u64)(input)?;

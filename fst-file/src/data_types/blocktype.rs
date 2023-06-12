@@ -1,14 +1,11 @@
 use std::fmt::{self, Debug};
 
 use enum_primitive_derive::Primitive;
-use nom::{bytes::complete::take, combinator::map_res};
+use nom::{bytes::complete::take, combinator::map_res, error::context};
 use num_traits::FromPrimitive;
 use serde::Serialize;
 
-use crate::{
-    error::{BlockParseError, FstFileResult},
-    FstParsable,
-};
+use crate::{error::ParseResult, FstParsable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Primitive, Serialize, Hash, PartialOrd, Ord)]
 #[repr(u8)]
@@ -56,22 +53,21 @@ impl fmt::Display for BlockType {
 }
 
 impl FstParsable for BlockType {
-    fn parse(input: &[u8]) -> FstFileResult<'_, Self> {
-        map_res(take(1u32), |data: &[u8]| {
-            Self::from_u8(data[0]).ok_or((data, BlockParseError::BlockTypeUnknown(data[0])))
-        })(input)
+    fn parse(input: &[u8]) -> ParseResult<'_, Self> {
+        context(
+            "block type",
+            map_res(take(1u32), |data: &[u8]| {
+                Self::from_u8(data[0]).ok_or((input, std::num::IntErrorKind::InvalidDigit))
+            }),
+        )(input)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use nom::Finish;
+    use nom::{error::VerboseErrorKind, Finish};
 
-    use crate::{
-        data_types::BlockType,
-        error::{BlockParseError, FstFileParseErrorInner},
-        FstParsable,
-    };
+    use crate::{data_types::BlockType, FstParsable};
 
     #[test]
     fn test_parse_block_type() {
@@ -82,9 +78,6 @@ mod test {
         let input = [250];
         let e = BlockType::parse(&input).finish().err().unwrap();
         assert_eq!(e.errors.len(), 2);
-        assert_eq!(
-            e.errors[0].1,
-            FstFileParseErrorInner::BlockParseError(BlockParseError::BlockTypeUnknown(250))
-        );
+        assert_eq!(e.errors[1].1, VerboseErrorKind::Context("block type"));
     }
 }
