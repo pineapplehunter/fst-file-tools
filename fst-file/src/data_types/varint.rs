@@ -84,10 +84,18 @@ impl Serialize for SVarInt {
 }
 
 impl TryFrom<VarInt> for usize {
-    type Error = <usize as TryFrom<u128>>::Error;
+    type Error = <usize as TryFrom<u64>>::Error;
 
     fn try_from(value: VarInt) -> Result<Self, Self::Error> {
         usize::try_from(value.0)
+    }
+}
+
+impl TryFrom<VarInt> for u32 {
+    type Error = <u32 as TryFrom<u64>>::Error;
+
+    fn try_from(value: VarInt) -> Result<Self, Self::Error> {
+        u32::try_from(value.0)
     }
 }
 

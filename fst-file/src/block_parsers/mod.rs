@@ -1,8 +1,8 @@
 use std::{fmt, io::Read};
 
 use nom::{
-    combinator::map,
-    error::{context, VerboseError},
+    combinator::map_res,
+    error::{context, ErrorKind, VerboseError},
     multi::length_data,
     number::complete::be_u64,
     IResult,
@@ -120,7 +120,14 @@ impl Block {
     }
 
     fn parse_block_length(input: &[u8]) -> IResult<&[u8], usize, VerboseError<&[u8]>> {
-        map(be_u64, |v| (v - 8) as usize)(input)
+        context(
+            "block length",
+            map_res(be_u64, |v| {
+                v.checked_sub(8)
+                    .map(|v| v as usize)
+                    .ok_or_else(|| (input, ErrorKind::Verify))
+            }),
+        )(input)
     }
 
     pub(crate) fn parse_block_with_position(

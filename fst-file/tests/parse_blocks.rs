@@ -23,7 +23,7 @@ fn parse_contents() {
 fn parse_header() {
     let content = get_test_file_content();
     let blocks = fst_file::parse(&content).unwrap();
-    blocks.header.get_content().unwrap();
+    blocks.header.unwrap().get_content().unwrap();
 }
 
 #[test]

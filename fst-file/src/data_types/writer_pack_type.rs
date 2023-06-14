@@ -1,8 +1,9 @@
 use nom::{branch::alt, bytes::complete::tag, combinator::map, error::context};
+use serde::Serialize;
 
 use crate::{error::ParseResult, FstParsable};
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum WriterPackType {
     Zlib,
     FaslLz,

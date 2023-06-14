@@ -12,7 +12,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use termion::color;
 use tracing::{debug, debug_span, error, metadata::LevelFilter, trace};
-use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::__tracing_subscriber_SubscriberExt};
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -119,6 +120,8 @@ enum Commands {
     Vcd {
         #[command(flatten)]
         common: CommonArgs,
+        #[arg(short, long)]
+        intermediate: bool,
     },
 }
 
@@ -134,7 +137,7 @@ impl CliArgs {
             Commands::Hierarchy { common, .. } => common,
             Commands::Geometry { common, .. } => common,
             Commands::Blackout { common, .. } => common,
-            Commands::Vcd { common } => common,
+            Commands::Vcd { common, .. } => common,
         }
     }
 }
@@ -170,10 +173,14 @@ impl<T> OnlyOnTerminal for T where T: fmt::Display {}
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
     let args = CliArgs::parse();
-    tracing_subscriber::fmt::fmt()
-        .with_writer(std::io::stderr)
-        .with_max_level(args.log_level)
-        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+    tracing_subscriber::registry()
+        .with(LevelFilter::from(args.log_level))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE),
+        )
+        .with(tracing_error::ErrorLayer::default())
         .init();
 
     trace!("start of cli");
@@ -287,7 +294,7 @@ fn main() -> color_eyre::Result<()> {
             ..
         } => {
             let blocks = fst_file::parse(&contents).unwrap();
-            let header_block = blocks.header;
+            let header_block = blocks.header.unwrap();
             match header_block.get_content() {
                 Ok(content) => match format {
                     OutputFormat::PlainText => println!("{:#?}", content),
@@ -386,12 +393,20 @@ fn main() -> color_eyre::Result<()> {
                 Err(e) => error!("Error while parsing header content {:?}", e),
             }
         }
-        Commands::Vcd { .. } => {
+        Commands::Vcd { intermediate, .. } => {
             let blocks = fst_file::parse(&contents).unwrap();
+            let header_content = blocks.header.unwrap().get_content().unwrap();
             for vcd_block in blocks.value_change_data {
-                match vcd_block.get_content() {
-                    Ok(vcd) => println!("{:#?}", vcd),
-                    Err(e) => println!("Error! {}", e),
+                if intermediate {
+                    match vcd_block.get_intermediate_content(&header_content) {
+                        Ok(vcd) => println!("{:?}", vcd),
+                        Err(e) => println!("Error! {}", e),
+                    }
+                } else {
+                    match vcd_block.get_content(&header_content) {
+                        Ok(vcd) => println!("{:?}", vcd),
+                        Err(e) => println!("Error! {}", e),
+                    }
                 }
             }
         }

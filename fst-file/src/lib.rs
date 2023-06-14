@@ -1,17 +1,18 @@
-use block_parsers::{blackout::BlackoutBlock, hierarchy::HierarchyBlock, Block};
+use block_parsers::{
+    blackout::BlackoutBlock, hierarchy::HierarchyBlock, value_change_data::ValueChangeDataBlock,
+    Block,
+};
 use data_types::{BlockInfo, BlockType};
 use error::{ParseResult, PositionError};
 use nom::{
-    combinator::{eof, map, map_res},
+    combinator::{complete, eof, map, map_res},
     error::{context, ErrorKind, ParseError, VerboseError, VerboseErrorKind},
     multi::many_till,
     Finish, IResult, Offset,
 };
 use tracing::{debug, debug_span};
 
-use crate::block_parsers::{
-    geometry::GeometryBlock, header::HeaderBlock, value_change_data::ValueChangeDataBlock,
-};
+use crate::block_parsers::{geometry::GeometryBlock, header::HeaderBlock};
 
 /// Block data and their parsers
 pub mod block_parsers;
@@ -19,23 +20,25 @@ pub mod data_types;
 pub mod error;
 
 /// Parses blocks
-fn parse_blocks(input: &[u8]) -> IResult<&[u8], Vec<BlockInfo>, VerboseError<&[u8]>> {
-    let input_original = input;
-    let (input, (blocks, _)) = many_till(
-        context(
-            "parse block",
-            map(Block::parse_block_with_position, |((s, e), b)| {
-                BlockInfo::from_offset_and_block(input_original.offset(s), s.offset(e) - 1, b)
-            }),
-        ),
-        eof,
-    )(input)?;
-    Ok((input, blocks))
+fn parse_blocks<'a>(input: &'a [u8]) -> IResult<&[u8], Vec<BlockInfo>, VerboseError<&[u8]>> {
+    complete(|input: &'a [u8]| {
+        let input_original = input;
+        let (input, (blocks, _)) = many_till(
+            context(
+                "parse block",
+                map(Block::parse_block_with_position, |((s, e), b)| {
+                    BlockInfo::from_offset_and_block(input_original.offset(s), s.offset(e) - 1, b)
+                }),
+            ),
+            eof,
+        )(input)?;
+        Ok((input, blocks))
+    })(input)
 }
 
 #[derive(Debug)]
 pub struct FstFileContent {
-    pub header: HeaderBlock,
+    pub header: Option<HeaderBlock>,
     pub hierarchy: Option<HierarchyBlock>,
     pub blackout: Option<BlackoutBlock>,
     pub geometry: Option<GeometryBlock>,
@@ -64,7 +67,7 @@ pub fn parse(input: &[u8]) -> Result<FstFileContent, PositionError<VerboseErrorK
             let mut blackout = None;
             let mut header = None;
             let mut geometry = None;
-            let mut value_change_data_tmp = Vec::new();
+            let mut value_change_data = Vec::new();
 
             for (i, block) in blocks.into_iter().enumerate() {
                 let block = block.take_block();
@@ -92,20 +95,11 @@ pub fn parse(input: &[u8]) -> Result<FstFileContent, PositionError<VerboseErrorK
                     | BlockType::ValueChangeDataAlias
                     | BlockType::ValueChangeDataAlias2 => {
                         debug!("using value change data block from #{}", i);
-                        value_change_data_tmp.push(block);
+                        value_change_data.push(ValueChangeDataBlock::from_block(block));
                     }
                     _ => {}
                 }
             }
-
-            let header = header.expect("header block did not exist");
-            let header_content = header.get_content().expect("could not get header content");
-            let value_change_data = value_change_data_tmp
-                .into_iter()
-                .map(|b| {
-                    ValueChangeDataBlock::from_block_and_header_data(b, header_content.num_vars)
-                })
-                .collect();
 
             FstFileContent {
                 hierarchy,
@@ -131,6 +125,22 @@ where
     move |input| {
         context(
             "as usize",
+            map_res(&f, |v| {
+                v.try_into()
+                    .map_err(|_| VerboseError::from_error_kind(input, ErrorKind::Digit))
+            }),
+        )(input)
+    }
+}
+
+pub(crate) fn convert_type<'a, V, F, U>(f: F) -> impl Fn(&'a [u8]) -> ParseResult<'a, U>
+where
+    V: TryInto<U>,
+    F: Fn(&'a [u8]) -> ParseResult<'a, V>,
+{
+    move |input| {
+        context(
+            "convert_type",
             map_res(&f, |v| {
                 v.try_into()
                     .map_err(|_| VerboseError::from_error_kind(input, ErrorKind::Digit))

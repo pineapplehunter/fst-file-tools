@@ -14,7 +14,7 @@ fn print_debug() {
     dbg!(&blocks);
 
     let header = blocks.header;
-    let header_content = header.get_content().unwrap();
+    let header_content = header.unwrap().get_content().unwrap();
     dbg!(&header_content);
     dbg!(serde_json::to_string(&header_content).unwrap());
 
