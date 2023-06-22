@@ -19,7 +19,7 @@ use crate::{error::ParseResult, FstParsable};
 /// See docs for more information. <https://blog.timhutt.co.uk/fst_spec/#_varints>
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
-pub struct VarInt(pub u64);
+pub struct VarInt<I = u64>(pub I);
 
 impl fmt::Debug for VarInt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

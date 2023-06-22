@@ -25,3 +25,9 @@ name = "parse_file"
 path = "fuzz_targets/parse_file.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "parse_header"
+path = "fuzz_targets/parse_header.rs"
+test = false
+doc = false

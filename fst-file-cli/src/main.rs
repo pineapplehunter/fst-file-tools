@@ -396,7 +396,7 @@ fn main() -> color_eyre::Result<()> {
         Commands::Vcd { intermediate, .. } => {
             let blocks = fst_file::parse(&contents).unwrap();
             let header_content = blocks.header.unwrap().get_content().unwrap();
-            for vcd_block in blocks.value_change_data {
+            for vcd_block in blocks.value_change_data.iter() {
                 if intermediate {
                     match vcd_block.get_intermediate_content(&header_content) {
                         Ok(vcd) => println!("{:?}", vcd),

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use block_parsers::{
     blackout::BlackoutBlock, hierarchy::HierarchyBlock, value_change_data::ValueChangeDataBlock,
     Block,
@@ -42,7 +44,7 @@ pub struct FstFileContent {
     pub hierarchy: Option<HierarchyBlock>,
     pub blackout: Option<BlackoutBlock>,
     pub geometry: Option<GeometryBlock>,
-    pub value_change_data: Vec<ValueChangeDataBlock>,
+    pub value_change_data: Arc<[ValueChangeDataBlock]>,
 }
 
 /// Parse the whole content of the fst file
@@ -106,7 +108,7 @@ pub fn parse(input: &[u8]) -> Result<FstFileContent, PositionError<VerboseErrorK
                 blackout,
                 header,
                 geometry,
-                value_change_data,
+                value_change_data: value_change_data.into(),
             }
         })
 }
