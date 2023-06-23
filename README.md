@@ -1,4 +1,5 @@
 # FST File
+[![codecov](https://codecov.io/gh/pineapplehunter/fst-file-tools/branch/main/graph/badge.svg?token=O8Ea4Reqqh)](https://codecov.io/gh/pineapplehunter/fst-file-tools)
 
 ## Features
 - [x] Show all blocks in FST
