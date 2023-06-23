@@ -1,0 +1,54 @@
+name: Coverage
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  RUSTFLAGS: -Dwarnings
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check_and_test:
+    name: check coverage
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        rust: [nightly]
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Cache cargo
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.os }}-${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+      # for local use
+      - name: install gcc
+        run: "which gcc && which pkg-config && pkg-config --libs --cflags openssl || bash -c 'apt update && apt install -y gcc pkg-config libssl-dev'"
+
+      - name: Install rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{matrix.rust}}
+          override: true
+          components: rustfmt, clippy
+      
+      - name: Install cargo-tarpaulin
+        uses: baptiste0928/cargo-install@v2
+        with:
+          crate: cargo-tarpaulin
+          
+      - name:                   Generate code coverage
+        run: |
+          cargo +nightly tarpaulin --verbose --all-features --workspace --timeout 120 --out Xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v3
